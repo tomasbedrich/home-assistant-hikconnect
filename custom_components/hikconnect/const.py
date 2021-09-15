@@ -1,0 +1,2 @@
+DOMAIN = "hikconnect"
+MANUFACTURER = "Hikvision"

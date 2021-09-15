@@ -1,0 +1,16 @@
+{
+  "domain": "hikconnect",
+  "name": "Hik-Connect",
+  "version": "0.1.0",
+  "iot_class": "cloud_polling",
+  "documentation": "https://github.com/tomasbedrich/home-assistant-hikconnect",
+  "issue_tracker": "https://github.com/tomasbedrich/home-assistant-hikconnect",
+  "dependencies": [],
+  "codeowners": [
+    "@tomasbedrich"
+  ],
+  "requirements": [
+    "hikconnect==0.3.0"
+  ],
+  "config_flow": true
+}

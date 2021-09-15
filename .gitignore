@@ -1,0 +1,7 @@
+# Python
+*.pyc
+*.egg-info
+__pycache__
+.ipynb_checkpoints
+pip-wheel-metadata/
+.venv/

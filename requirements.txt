@@ -1,0 +1,2 @@
+homeassistant~=0.116.2
+voluptuous~=0.12.0

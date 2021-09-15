@@ -1,0 +1,13 @@
+{
+  "name": "Hik-Connect",
+  "domains": [
+    "hikconnect"
+  ],
+  "country": [
+    "EN"
+  ],
+  "render_readme": true,
+  "iot_class": [
+    "Cloud Polling"
+  ]
+}
