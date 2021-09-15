@@ -12,7 +12,3 @@ jobs:
     steps:
       - uses: "actions/checkout@v2"
       - uses: home-assistant/actions/hassfest@master
-      - run: |
-          python3 -m pip install wheel setuptools
-          python3 -m pip install black
-          python3 -m black . --check
