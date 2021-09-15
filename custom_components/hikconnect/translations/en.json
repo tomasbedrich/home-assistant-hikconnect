@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hik-Connect credentials",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "login_failed": "Authentication failure. May be a wrong username/password combination or CAPTCHA. Try logging in using official Hik-Connect application.",
+      "unknown": "Unknown error."
+    },
+    "abort": {
+      "already_configured": "Already configured for this username."
+    }
+  }
+}
