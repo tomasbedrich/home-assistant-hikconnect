@@ -14,12 +14,8 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities
 ):
-    if "api" in hass.data[DOMAIN][entry.entry_id]:
-        api = hass.data[DOMAIN][entry.entry_id]["api"]
-    else:
-        api = HikConnect()
-        await api.login(entry.data["username"], entry.data["password"])
-        hass.data[DOMAIN][entry.entry_id]["api"] = api
+    api = hass.data[DOMAIN][entry.entry_id].setdefault("api", HikConnect())
+    await api.login(entry.data["username"], entry.data["password"])
 
     # TODO add device to group cameras
 

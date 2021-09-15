@@ -15,16 +15,17 @@ _schema = {
 DATA_SCHEMA = vol.Schema(_schema)
 
 
-async def validate_input(hass: core.HomeAssistant, data: dict, api):
+async def validate_input(hass: core.HomeAssistant, data: dict):
     """
     Validate the user input by logging into Hik-Connect.
 
     Data has the keys from DATA_SCHEMA with values provided by the user.
     """
-    try:
-        await api.login(data["username"], data["password"])
-    except ValueError as e:
-        raise LoginFailed() from e
+    async with HikConnect() as api:
+        try:
+            await api.login(data["username"], data["password"])
+        except ValueError as e:
+            raise LoginFailed() from e
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -36,17 +37,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step of config flow initiated by user manually."""
         errors = {}
         if user_input is not None:
-            api = HikConnect()
             try:
-                await validate_input(self.hass, user_input, api)
+                await validate_input(self.hass, user_input)
                 unique_id = user_input["username"]
                 _LOGGER.info(
                     "Adding Hik-Connect config entry with unique_id=%s", unique_id
                 )
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
-                data = {**user_input, "api": api}
-                return self.async_create_entry(title=unique_id, data=data)
+                return self.async_create_entry(title=unique_id, data=user_input)
             except LoginFailed:
                 # to show hikconnect library exception in logs
                 _LOGGER.exception("Hik-Connect login failed")
