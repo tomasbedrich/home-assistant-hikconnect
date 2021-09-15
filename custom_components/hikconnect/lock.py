@@ -26,7 +26,7 @@ async def async_setup_entry(
     _LOGGER.info("Getting devices")
     new_entities = []
     async for device_info in api.get_devices():
-        _LOGGER.info("Getting cameras for device: %s", device_info["serial"])
+        _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
         async for camera_info in api.get_cameras(device_info["serial"]):
             new_entities.append(Latch(api, device_info, camera_info))
 
