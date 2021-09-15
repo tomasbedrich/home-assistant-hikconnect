@@ -11,7 +11,9 @@ from .const import DOMAIN, MANUFACTURER
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities
+):
     if "api" in hass.data[DOMAIN][entry.entry_id]:
         api = hass.data[DOMAIN][entry.entry_id]["api"]
     else:
@@ -68,7 +70,7 @@ class Device:
             "manufacturer": MANUFACTURER,
             "name": self.name,
             "sw_version": self.sw_version,
-            "model": self.model
+            "model": self.model,
         }
 
 
@@ -82,10 +84,7 @@ class Latch(LockEntity):
     """
 
     def __init__(
-        self,
-        api: HikConnect,
-        device_info: dict,
-        camera_info: dict,
+        self, api: HikConnect, device_info: dict, camera_info: dict,
     ):
         self._api = api
         self._device_info = device_info
@@ -101,7 +100,9 @@ class Latch(LockEntity):
         raise NotImplementedError()
 
     async def async_open(self, **kwargs):
-        await self._api.unlock(self._device_info["serial"], self._camera_info["channel_number"])
+        await self._api.unlock(
+            self._device_info["serial"], self._camera_info["channel_number"]
+        )
 
     @property
     def name(self):
@@ -122,7 +123,7 @@ class Latch(LockEntity):
             # TODO following 2 are better to be moved to Device
             # "sw_version": self._device_info["version"],
             # "model": self._device_info["type"],
-            "via_device": (DOMAIN, self._device_info["id"])
+            "via_device": (DOMAIN, self._device_info["id"]),
         }
 
     @property

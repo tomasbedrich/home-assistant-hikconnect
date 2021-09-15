@@ -8,10 +8,11 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-DATA_SCHEMA = vol.Schema({
+_schema = {
     vol.Required("username"): str,
     vol.Required("password"): str,
-})
+}
+DATA_SCHEMA = vol.Schema(_schema)
 
 
 async def validate_input(hass: core.HomeAssistant, data: dict, api):
@@ -42,16 +43,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 await validate_input(self.hass, user_input, api)
                 unique_id = user_input["username"]
-                _LOGGER.info("Adding Hik-Connect config entry with unique_id=%s", unique_id)
+                _LOGGER.info(
+                    "Adding Hik-Connect config entry with unique_id=%s", unique_id
+                )
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
-                data = {
-                    **user_input,
-                    "api": api
-                }
+                data = {**user_input, "api": api}
                 return self.async_create_entry(title=unique_id, data=data)
             except LoginFailed:
-                _LOGGER.exception("Hik-Connect login failed")  # to show hikconnect library exception in logs
+                # to show hikconnect library exception in logs
+                _LOGGER.exception("Hik-Connect login failed")
                 errors["base"] = "login_failed"
             except Exception:  # NOQA
                 _LOGGER.exception("Unexpected exception")
@@ -64,4 +65,3 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class LoginFailed(exceptions.HomeAssistantError):
     pass
-
