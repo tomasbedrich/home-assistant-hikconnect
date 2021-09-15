@@ -26,9 +26,6 @@ async def validate_input(hass: core.HomeAssistant, data: dict, api):
     except ValueError as e:
         raise LoginFailed() from e
 
-    # only test that API is working, don't return anything cause are only setting up the INTEGRATION
-    await api.get_devices()
-
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
