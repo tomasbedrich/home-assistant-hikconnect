@@ -1,19 +1,18 @@
+import datetime
 import logging
 
-from hikconnect import HikConnect
+from hikconnect.api import HikConnect
 from homeassistant.components.lock import LockEntity, SUPPORT_OPEN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import event
 
 from .const import DOMAIN, MANUFACTURER
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities
-):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     data = hass.data[DOMAIN].setdefault(entry.entry_id, {})
     api = data.setdefault("api", HikConnect())
     await api.login(entry.data["username"], entry.data["password"])
@@ -30,45 +29,24 @@ async def async_setup_entry(
     if new_entities:
         async_add_entities(new_entities)
 
+    async def relogin_if_needed():
+        if api.is_refresh_login_needed():
+            await api.refresh_login()
+
+    if "cancel_relogin_task" not in data:
+        data["cancel_relogin_task"] = event.async_track_time_interval(
+            hass, relogin_if_needed, datetime.timedelta(minutes=10)
+        )
+
 
 async def async_unload_entry(hass, entry):
-    api = hass.data[DOMAIN].pop(entry.entry_id)["api"]
-    # await api.close()
-
-
-class Device:
-    def __init__(self, api: HikConnect, device_info: dict):
-        self._api = api
-        self._device_info = device_info
-
-    @property
-    def name(self):
-        return self._device_info["name"]
-
-    @property
-    def unique_id(self):
-        return "-".join((DOMAIN, self._device_info["id"]))
-
-    @property
-    def model(self):
-        return self._device_info["type"]
-
-    @property
-    def sw_version(self):
-        return self._device_info["version"]
-
-    @property
-    def device_info(self):
-        """Information about this entity/device."""
-        # TODO don't know if this is used or the properties?
-        # https://developers.home-assistant.io/docs/device_registry_index/#device-properties
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "manufacturer": MANUFACTURER,
-            "name": self.name,
-            "sw_version": self.sw_version,
-            "model": self.model,
-        }
+    data = hass.data[DOMAIN].pop(entry.entry_id)
+    cancel_relogin_task = data.get("cancel_relogin_task")
+    if cancel_relogin_task:
+        cancel_relogin_task()
+    api = data.get("api")
+    if api:
+        await api.close()
 
 
 class Latch(LockEntity):
@@ -97,13 +75,11 @@ class Latch(LockEntity):
         raise NotImplementedError()
 
     async def async_open(self, **kwargs):
-        await self._api.unlock(
-            self._device_info["serial"], self._camera_info["channel_number"]
-        )
+        await self._api.unlock(self._device_info["serial"], self._camera_info["channel_number"])
 
     @property
     def name(self):
-        return f"{self._device_info['name']}: {self._camera_info['name']}"
+        return f"{self._device_info['serial']}: {self._camera_info['name']}"
 
     @property
     def unique_id(self):
@@ -137,15 +113,8 @@ class Latch(LockEntity):
         return True
 
     @property
-    def state(self):
-        return STATE_UNAVAILABLE
-
-    @property
-    def state_attributes(self):
-        return {
-            "signal_status": self._camera_info["signal_status"],
-            "is_shown": self._camera_info["is_shown"],
-        }
+    def is_locked(self):
+        return False
 
     @property
     def icon(self):
