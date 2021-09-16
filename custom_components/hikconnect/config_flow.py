@@ -1,8 +1,9 @@
 import logging
 
 import voluptuous as vol
-from hikconnect import HikConnect
-from homeassistant import config_entries, exceptions, core
+from hikconnect.api import HikConnect
+from hikconnect.exceptions import LoginError
+from homeassistant import config_entries, core
 
 from .const import DOMAIN
 
@@ -22,10 +23,7 @@ async def validate_input(hass: core.HomeAssistant, data: dict):
     Data has the keys from DATA_SCHEMA with values provided by the user.
     """
     async with HikConnect() as api:
-        try:
-            await api.login(data["username"], data["password"])
-        except ValueError as e:
-            raise LoginFailed() from e
+        await api.login(data["username"], data["password"])
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -46,7 +44,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title=unique_id, data=user_input)
-            except LoginFailed:
+            except LoginError as e:
                 # to show hikconnect library exception in logs
                 _LOGGER.exception("Hik-Connect login failed")
                 errors["base"] = "login_failed"
@@ -57,7 +55,3 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
-
-
-class LoginFailed(exceptions.HomeAssistantError):
-    pass
