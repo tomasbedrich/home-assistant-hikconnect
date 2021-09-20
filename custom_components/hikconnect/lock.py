@@ -29,11 +29,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     if new_entities:
         async_add_entities(new_entities)
 
-    async def relogin_if_needed():
-        if api.is_refresh_login_needed():
+    async def relogin_if_needed(_now):
+        needed = api.is_refresh_login_needed()
+        _LOGGER.debug("Relogin if needed called, relogin %s needed", ("IS" if needed else "IS NOT"))
+        if needed:
             await api.refresh_login()
 
     if "cancel_relogin_task" not in data:
+        # TODO change to async_track_point_in_time
         data["cancel_relogin_task"] = event.async_track_time_interval(
             hass, relogin_if_needed, datetime.timedelta(minutes=10)
         )
@@ -66,10 +69,10 @@ class Latch(LockEntity):
         self._camera_info = camera_info
 
     def lock(self, **kwargs):
-        _LOGGER.info("Locking not implemented")
+        _LOGGER.warning("Locking not implemented")
 
     def unlock(self, **kwargs):
-        _LOGGER.info("Unlocking not implemented")
+        _LOGGER.warning("Unlocking not implemented")
 
     def open(self, **kwargs):
         raise NotImplementedError()
