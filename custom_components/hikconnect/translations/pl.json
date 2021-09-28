@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hik-Connect poświadczenia",
+        "data": {
+          "username": "Nazwa użytkownika",
+          "password": "Hasło"
+        }
+      }
+    },
+    "error": {
+      "login_failed": "Błąd autoryzacji. Może być nieprawidłową kombinacją nazwy użytkownika/hasła lub CAPTCHA. Spróbuj zalogować się za pomocą oficjalnej aplikacji Hik-Connect.",
+      "unknown": "Nieznany błąd."
+    },
+    "abort": {
+      "already_configured": "Już skonfigurowano dla tej nazwy użytkownika."
+    }
+  }
+}
