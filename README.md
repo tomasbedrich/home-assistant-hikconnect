@@ -19,7 +19,7 @@ Based on [hikconnect](https://github.com/tomasbedrich/hikconnect) Python library
 
 This installation method is **preferred** since it allows automatic updates in the future.
 
-1. Add this repository URL (`https://github.com/tomasbedrich/home-assistant-skydance`) as a custom repostiory in HACS.
+1. Add this repository URL (`https://github.com/tomasbedrich/home-assistant-hikconnect`) as a custom repostiory in HACS.
    It appears in the list among other repositories.
 2. Install using HACS.
 3. Restart Home Assistant.
