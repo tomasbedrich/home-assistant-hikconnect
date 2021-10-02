@@ -64,9 +64,7 @@ class Latch(LockEntity):
     That's the story behind naming this class "Latch".
     """
 
-    def __init__(
-        self, api: HikConnect, device_info: dict, camera_info: dict, lock_index: int
-    ):
+    def __init__(self, api: HikConnect, device_info: dict, camera_info: dict, lock_index: int):
         self._api = api
         self._device_info = device_info
         self._camera_info = camera_info
@@ -93,7 +91,7 @@ class Latch(LockEntity):
 
     @property
     def unique_id(self):
-        return "-".join((DOMAIN, self._device_info["id"], self._camera_info["id"], self._lock_index))
+        return "-".join((DOMAIN, self._device_info["id"], self._camera_info["id"], str(self._lock_index)))
 
     @property
     def device_info(self):
