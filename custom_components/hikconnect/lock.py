@@ -24,7 +24,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async for device_info in api.get_devices():
         _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
         async for camera_info in api.get_cameras(device_info["serial"]):
-            new_entities.append(Latch(api, device_info, camera_info))
+            number_of_locks = device_info["locks"].get(camera_info["channel_number"], 0)
+            # we can have camera-only devices (no locks to control)
+            for lock_index in range(number_of_locks):
+                new_entities.append(Latch(api, device_info, camera_info, lock_index))
 
     if new_entities:
         async_add_entities(new_entities)
@@ -62,11 +65,12 @@ class Latch(LockEntity):
     """
 
     def __init__(
-        self, api: HikConnect, device_info: dict, camera_info: dict,
+        self, api: HikConnect, device_info: dict, camera_info: dict, lock_index: int
     ):
         self._api = api
         self._device_info = device_info
         self._camera_info = camera_info
+        self._lock_index = lock_index
 
     def lock(self, **kwargs):
         _LOGGER.warning("Locking not implemented")
@@ -78,15 +82,18 @@ class Latch(LockEntity):
         raise NotImplementedError()
 
     async def async_open(self, **kwargs):
-        await self._api.unlock(self._device_info["serial"], self._camera_info["channel_number"])
+        await self._api.unlock(self._device_info["serial"], self._camera_info["channel_number"], self._lock_index)
 
     @property
     def name(self):
-        return f"{self._device_info['serial']}: {self._camera_info['name']}"
+        name = f"{self._device_info['serial']}: {self._camera_info['name']}"
+        if self._lock_index:
+            name += f" {self._lock_index + 1}"
+        return name
 
     @property
     def unique_id(self):
-        return "-".join((DOMAIN, self._device_info["id"], self._camera_info["id"]))
+        return "-".join((DOMAIN, self._device_info["id"], self._camera_info["id"], self._lock_index))
 
     @property
     def device_info(self):
