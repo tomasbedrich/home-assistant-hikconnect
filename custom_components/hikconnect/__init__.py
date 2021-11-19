@@ -80,6 +80,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 via_device=ha_device_id,
             )
 
+    # TODO handle multiple instances of the same integration
     hass.data[DOMAIN] = {
         "api": api,
         "coordinator": coordinator,
