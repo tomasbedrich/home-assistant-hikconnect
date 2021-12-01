@@ -3,15 +3,14 @@ from datetime import timedelta
 
 import aiohttp
 from hikconnect.api import HikConnect
-from hikconnect.exceptions import LoginError, HikConnectError
+from hikconnect.exceptions import HikConnectError, LoginError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady, ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, PLATFORMS, MANUFACTURER
-from .lock import Latch
+from .const import DOMAIN, MANUFACTURER, PLATFORMS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,18 +43,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             devices = [device async for device in api.get_devices()]
             for device_info in devices:
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
-                cameras = [camera async for camera in api.get_cameras(device_info["serial"])]
+                cameras = [c async for c in api.get_cameras(device_info["serial"])]
                 device_info.update({"cameras": cameras})
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
             raise UpdateFailed(e) from e
 
+    # refreshing device info can be relativelly infrequent
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
         name=DOMAIN,
         update_method=async_update,
-        update_interval=timedelta(hours=1),  # refreshing device info can be relativelly infrequent
+        update_interval=timedelta(hours=1),
     )
     await coordinator.async_config_entry_first_refresh()
 
