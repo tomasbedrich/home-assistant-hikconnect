@@ -4,6 +4,8 @@ A Home Assistant integration to communicate with Hikvision smart doorbells via H
 
 <a href="https://www.buymeacoffee.com/tomasbedrich" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 30px !important;width: 106px !important;" ></a>
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
+
 Based on [hikconnect](https://github.com/tomasbedrich/hikconnect) Python library.
 
 
@@ -17,14 +19,10 @@ Based on [hikconnect](https://github.com/tomasbedrich/hikconnect) Python library
 
 ## Installation
 
-### HACS custom repository
+### HACS
+This install method is **preferred** since it allows automatic updates in the future.
 
-This installation method is **preferred** since it allows automatic updates in the future.
-
-1. Add this repository URL (`https://github.com/tomasbedrich/home-assistant-hikconnect`) as a custom repostiory in HACS.
-   It appears in the list among other repositories.
-2. Install using HACS.
-3. Restart Home Assistant.
+Install by searching for _Hik-Connect_ integration in [HACS](https://hacs.xyz/).
 
 ### Manual
 1. [Download an integration](https://github.com/tomasbedrich/home-assistant-hikconnect/archive/master.zip).
