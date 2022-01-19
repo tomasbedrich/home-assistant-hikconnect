@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Credenciales de Acceso de Hik-Connect",
+        "data": {
+          "username": "Nombre de Usuario",
+          "password": "Contraseña"
+        }
+      }
+    },
+    "error": {
+      "login_failed": "Fallo de Autenticación. Posible combinación incorrecta de Nombre de Usuario/Contraseña o CAPTCHA. Intente ingresar usando la aplicación oficial de Hik-Connect.",
+      "unknown": "Error desconocido."
+    },
+    "abort": {
+      "already_configured": "Ya se ha configurado para este nombre de usuario."
+    }
+  }
+}
