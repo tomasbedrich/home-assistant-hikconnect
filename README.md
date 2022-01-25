@@ -4,30 +4,47 @@ A Home Assistant integration to communicate with Hikvision smart doorbells via H
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
 
-Based on [hikconnect](https://github.com/tomasbedrich/hikconnect) Python library.
+### Features
+- Unlock a lock connected to Hikvision outdoor station.
 
+Nothing more yet, sorry. :) Visit an [issue tracker] to discuss planned features.
 
-## Usage
+### Warning
+If you have direct LAN access to your Hikvision device, **you may NOT want to use this integration.**
 
-1. Go to Home Assistant.
-   Install this integration (see below).
-2. Set up the integration in Configuration > Integrations > Add Integration.
-3. Enjoy.
+Why? The scope of this project is to mirror functionality available in [Hik-Connect mobile application] - nothing more.
+You can usually get more functions, faster responses and more stability by connecting to your device locally, if possible.
+Please see [forum thread about LAN based integration] for more info.
 
+The target audience of this integration is people living in block of flats where other Hikvision devices (outdoor stations,
+recorders) are managed by someone else, and you don't have physical (admin) access to any of these.
+
+To be clear - if you are satisfied with this integration with regard to limited functionality and Hik-Connect cloud dependency,
+feel free to use it even for LAN connected devices.
 
 ## Installation
 
 ### HACS
-This install method is **preferred** since it allows automatic updates in the future.
+This installation method is **preferred** since it allows automatic updates in the future.
 
-Install by searching for _Hik-Connect_ integration in [HACS](https://hacs.xyz/).
+Install by searching for _Hik-Connect_ integration in [HACS].
 
 ### Manual
-1. [Download an integration](https://github.com/tomasbedrich/home-assistant-hikconnect/archive/master.zip).
+1. [Download this integration].
 2. Copy the folder `custom_components/hikconnect` from the zip to your config directory.
 3. Restart Home Assistant.
 
 
-## Known issues / limitations
+## Links
+- [`hikconnect` Python library]
+- [forum thread about this integration]
+- [forum thread about LAN based integration]
 
-...
+
+[issue tracker]: https://github.com/tomasbedrich/home-assistant-hikconnect/issues
+[Hik-Connect mobile application]: https://www.hik-connect.com/views/qrcode/hc/index.html
+[HACS]: https://hacs.xyz/
+[Download this integration]: https://github.com/tomasbedrich/home-assistant-hikconnect/archive/master.zip
+[`hikconnect` Python library]: https://github.com/tomasbedrich/hikconnect
+[forum thread about this integration]: https://community.home-assistant.io/t/hik-connect/342202
+[forum thread about LAN based integration]: https://community.home-assistant.io/t/ds-kd8003-ds-kv8113-ds-kv8213-ds-kv6113-ds-kv8413-and-integration-hikvision-hikconnect-video-intercom-doorbell/238535
