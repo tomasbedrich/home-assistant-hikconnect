@@ -6,6 +6,7 @@ A Home Assistant integration to communicate with Hikvision smart doorbells via H
 
 ### Features
 - Unlock a lock connected to Hikvision outdoor station.
+- Report call status of an indoor station (idle, ringing, call in progress) + call source (number of building, floor, etc.).
 
 Nothing more yet, sorry. :) Visit an [issue tracker] to discuss planned features.
 
