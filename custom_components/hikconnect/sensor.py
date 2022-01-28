@@ -38,29 +38,8 @@ class CallStatusSensor(SensorEntity):
 
     async def async_update(self) -> None:
         res = await self._api.get_call_status(self._device_info["serial"])
-        # TODO fix API of hikconnect library / make it more human friendly
-        res_json = json.loads(res)
-        status = res_json["callStatus"]
-        info = res_json["callerInfo"]
-
-        try:
-            self._attr_native_value = {1: "idle", 2: "ringing", 3: "call in progress"}[status]
-        except KeyError:
-            _LOGGER.warning("Unknown call status: %s", status)
-            self._attr_native_value = "unknown"
-
-        try:
-            self._attr_extra_state_attributes = {
-                "building_number": info["buildingNo"],
-                "floor_number": info["floorNo"],
-                "zone_number": info["zoneNo"],
-                "unit_number": info["unitNo"],
-                "device_number": info["devNo"],
-                "device_type": info["devType"],
-                "lock_number": info["lockNum"],
-            }
-        except KeyError:
-            _LOGGER.exception("Error getting call info: %s", status)
+        self._attr_native_value = res["status"]
+        self._attr_extra_state_attributes = res["info"]
 
     @property
     def name(self):

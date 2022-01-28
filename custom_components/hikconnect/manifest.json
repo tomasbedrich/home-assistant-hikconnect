@@ -10,7 +10,7 @@
     "@tomasbedrich"
   ],
   "requirements": [
-    "hikconnect==0.7.3"
+    "hikconnect==1.0.0"
   ],
   "config_flow": true
 }
