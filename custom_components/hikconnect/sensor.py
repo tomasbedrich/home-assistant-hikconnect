@@ -1,7 +1,8 @@
-import json
+import asyncio
 import logging
 from datetime import timedelta
 
+import aiohttp
 from hikconnect.api import HikConnect
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -12,11 +13,23 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=3)
+SCAN_INTERVAL_TIMEOUT = timedelta(seconds=2.9)
+
+
+def _filter_call_status_log(record: logging.LogRecord):
+    """Downgrade a single log message from HikConnect.get_call_status() to DEBUG level."""
+    if record.levelno == logging.INFO and "call status" in record.msg:
+        record.levelno = logging.DEBUG
+        record.levelname = "DEBUG"
+    return record
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     data = hass.data[DOMAIN]
     api, coordinator = data["api"], data["coordinator"]
+
+    hikconnect_logger = logging.getLogger("hikconnect.api")
+    hikconnect_logger.addFilter(_filter_call_status_log)
 
     new_entities = []
     for device_info in coordinator.data:
@@ -35,11 +48,21 @@ class CallStatusSensor(SensorEntity):
         super().__init__()
         self._api = api
         self._device_info = device_info
+        self._error_counter = 0
 
     async def async_update(self) -> None:
-        res = await self._api.get_call_status(self._device_info["serial"])
+        get_call_status_coro = self._api.get_call_status(self._device_info["serial"])
+        try:
+            res = await asyncio.wait_for(get_call_status_coro, SCAN_INTERVAL_TIMEOUT.seconds)
+        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError) as e:
+            self._error_counter += 1
+            if self._error_counter > 10:  # don't log rare issues
+                _LOGGER.warning("Update failed: '%s'", e)
+            # simply ignore the errors and keep the last state
+            return
         self._attr_native_value = res["status"]
         self._attr_extra_state_attributes = res["info"]
+        self._error_counter = 0
 
     @property
     def name(self):
