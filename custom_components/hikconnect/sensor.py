@@ -13,23 +13,30 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 SCAN_INTERVAL = timedelta(seconds=3)
-SCAN_INTERVAL_TIMEOUT = timedelta(seconds=2.9)
+SCAN_INTERVAL_TIMEOUT = timedelta(seconds=2.8)
+ERROR_THRESHOLD = 10
 
 
-def _filter_call_status_log(record: logging.LogRecord):
-    """Downgrade a single log message from HikConnect.get_call_status() to DEBUG level."""
-    if record.levelno == logging.INFO and "call status" in record.msg:
-        record.levelno = logging.DEBUG
-        record.levelname = "DEBUG"
-    return record
+def _patch_hikconnect_logger():
+    """
+    Discard a single log message from HikConnect.get_call_status() if log level is INFO.
+
+    This is to prevent too verbose logging, because get_call_status() is called in 3s loop.
+    It should remain working when explicitly desired by setting log level to DEBUG.
+    """
+    def log_filter(record: logging.LogRecord):
+        return not (record.levelno == logging.INFO and "call status" in record.msg)
+
+    hikconnect_logger = logging.getLogger("hikconnect.api")
+    if hikconnect_logger.getEffectiveLevel() == logging.INFO:
+        hikconnect_logger.addFilter(log_filter)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     data = hass.data[DOMAIN]
     api, coordinator = data["api"], data["coordinator"]
 
-    hikconnect_logger = logging.getLogger("hikconnect.api")
-    hikconnect_logger.addFilter(_filter_call_status_log)
+    _patch_hikconnect_logger()
 
     new_entities = []
     for device_info in coordinator.data:
@@ -54,15 +61,18 @@ class CallStatusSensor(SensorEntity):
         get_call_status_coro = self._api.get_call_status(self._device_info["serial"])
         try:
             res = await asyncio.wait_for(get_call_status_coro, SCAN_INTERVAL_TIMEOUT.seconds)
-        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError) as e:
+            self._attr_native_value = res["status"]
+            self._attr_extra_state_attributes = res["info"]
+            self._error_counter = 0
+        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError):
             self._error_counter += 1
-            if self._error_counter > 10:  # don't log rare issues
-                _LOGGER.warning("Update failed: '%s'", e)
-            # simply ignore the errors and keep the last state
-            return
-        self._attr_native_value = res["status"]
-        self._attr_extra_state_attributes = res["info"]
-        self._error_counter = 0
+            if self._error_counter % ERROR_THRESHOLD == 0:
+                # don't log:
+                # - occurrences < ERROR_THRESHOLD ... rare issues
+                # - N*ERROR_THRESHOLD < occurrence < (N+1)*ERROR_THRESHOLD ... error condition remains
+                #   for longer period of time (e.g. API is down)
+                _LOGGER.exception("Update of call status failed %d times in a row", ERROR_THRESHOLD)
+                raise
 
     @property
     def name(self):
