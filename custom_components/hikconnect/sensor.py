@@ -12,9 +12,9 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-SCAN_INTERVAL = timedelta(seconds=3)
+SCAN_INTERVAL = timedelta(seconds=3)  # TODO make it configurable via UI?
 SCAN_INTERVAL_TIMEOUT = timedelta(seconds=2.8)
-ERROR_THRESHOLD = 10
+RAISE_ON_ERRORS = False  # TODO make it configurable via UI?
 
 
 def _patch_hikconnect_logger():
@@ -55,7 +55,7 @@ class CallStatusSensor(SensorEntity):
         super().__init__()
         self._api = api
         self._device_info = device_info
-        self._error_counter = 0
+        self._attr_available = False
 
     async def async_update(self) -> None:
         get_call_status_coro = self._api.get_call_status(self._device_info["serial"])
@@ -63,16 +63,15 @@ class CallStatusSensor(SensorEntity):
             res = await asyncio.wait_for(get_call_status_coro, SCAN_INTERVAL_TIMEOUT.seconds)
             self._attr_native_value = res["status"]
             self._attr_extra_state_attributes = res["info"]
-            self._error_counter = 0
+            self._attr_available = True
         except (asyncio.TimeoutError, aiohttp.ClientError, KeyError):
-            self._error_counter += 1
-            if self._error_counter % ERROR_THRESHOLD == 0:
-                # don't log:
-                # - occurrences < ERROR_THRESHOLD ... rare issues
-                # - N*ERROR_THRESHOLD < occurrence < (N+1)*ERROR_THRESHOLD ... error condition remains
-                #   for longer period of time (e.g. API is down)
-                _LOGGER.exception("Update of call status failed %d times in a row", ERROR_THRESHOLD)
+            if RAISE_ON_ERRORS:
+                _LOGGER.exception("Update of call status failed")
                 raise
+            else:
+                # don't raise by default because hikconnect API errors are
+                # so frequent, that they can spam logs A LOT
+                self._attr_available = False
 
     @property
     def name(self):
