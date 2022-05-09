@@ -49,13 +49,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         except (HikConnectError, aiohttp.ClientError) as e:
             raise UpdateFailed(e) from e
 
-    # refreshing device info can be relativelly infrequent
+    # Refreshing device info can be relativelly infrequent, but...
+    # BEWARE: Multiple people reported that they needed to restart the
+    # integration every 24h / 48h. This is suspiciously regular.
+    # There is probably a race condition between `update_interval`
+    # and `api.is_refresh_login_needed()` => let's update it more often
+    # than once per hour.
+    # see: https://github.com/tomasbedrich/home-assistant-hikconnect/issues/27
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
         name=DOMAIN,
         update_method=async_update,
-        update_interval=timedelta(hours=1),
+        update_interval=timedelta(minutes=30),
     )
     await coordinator.async_config_entry_first_refresh()
 
