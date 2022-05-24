@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hik-Connect tunnukset",
+        "data": {
+          "username": "Käyttäjänimi",
+          "password": "Salasana"
+        }
+      }
+    },
+    "error": {
+      "login_failed": "Todennusvirhe. Väärä käyttäjänimi/salasana yhdistelmä tai CAPTCHA varmennus käytössä. Yritä kirjautumista virallisella Hik-Connect applikaatiolla.",
+      "unknown": "Tuntematon virhe."
+    },
+    "abort": {
+      "already_configured": "Tämä käyttäjätunnus on jo määritelty."
+    }
+  }
+}
