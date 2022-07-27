@@ -17,6 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     api = HikConnect()
+    api.BASE_URL = entry.data["base_url"]
 
     try:
         await api.login(entry.data["username"], entry.data["password"])
@@ -92,6 +93,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         "coordinator": coordinator,
     }
     hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry):
+    _LOGGER.debug("Migrating from version %s", entry.version)
+
+    if entry.version == 1:
+        new = {**entry.data, "base_url": HikConnect.BASE_URL}
+        entry.version = 2
+        hass.config_entries.async_update_entry(entry, data=new)
+
+    _LOGGER.info("Migration to version %s successful", entry.version)
 
     return True
 

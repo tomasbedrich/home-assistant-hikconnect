@@ -5,13 +5,15 @@
         "title": "Hik-Connect credentials",
         "data": {
           "username": "Username",
-          "password": "Password"
+          "password": "Password",
+          "base_url": "Hik-Connect API URL"
         }
       }
     },
     "error": {
       "login_failed": "Authentication failure. May be a wrong username/password combination or CAPTCHA. Try logging in using official Hik-Connect application.",
-      "unknown": "Unknown error."
+      "unknown": "Unknown error.",
+      "invalid_base_url": "The URL needs to be in form: http(s)://example.com"
     },
     "abort": {
       "already_configured": "Already configured for this username."
