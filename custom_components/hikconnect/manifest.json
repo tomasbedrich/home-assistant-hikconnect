@@ -1,21 +1,23 @@
 {
-  "domain": "hikconnect",
-  "name": "Hik-Connect",
-  "version": "2.0.0",
-  "integration_type": "hub",
-  "iot_class": "cloud_polling",
-  "documentation": "https://github.com/tomasbedrich/home-assistant-hikconnect",
-  "issue_tracker": "https://github.com/tomasbedrich/home-assistant-hikconnect/issues",
-  "dependencies": ["network"],
-  "loggers": [
-    "custom_components.hikconnect",
-    "hikconnect"
-  ],
-  "codeowners": [
-    "@tomasbedrich"
-  ],
-  "requirements": [
-    "hikconnect==1.0.0"
-  ],
-  "config_flow": true
+	"domain": "hikconnect",
+	"name": "Hik-Connect",
+	"codeowners": [
+		"@tomasbedrich"
+	],
+	"config_flow": true,
+	"dependencies": [
+		"network"
+	],
+	"documentation": "https://github.com/tomasbedrich/home-assistant-hikconnect",
+	"integration_type": "hub",
+	"iot_class": "cloud_polling",
+	"issue_tracker": "https://github.com/tomasbedrich/home-assistant-hikconnect/issues",
+	"loggers": [
+		"custom_components.hikconnect",
+		"hikconnect"
+	],
+	"requirements": [
+		"hikconnect==1.0.0"
+	],
+	"version": "2.0.0"
 }
