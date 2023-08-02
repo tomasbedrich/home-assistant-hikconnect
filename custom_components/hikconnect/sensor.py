@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from datetime import timedelta
 
@@ -64,7 +65,7 @@ class CallStatusSensor(SensorEntity):
             self._attr_native_value = res["status"]
             self._attr_extra_state_attributes = res["info"]
             self._attr_available = True
-        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError):
+        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError, json.decoder.JSONDecodeError):
             if RAISE_ON_ERRORS:
                 _LOGGER.exception("Update of call status failed")
                 raise
