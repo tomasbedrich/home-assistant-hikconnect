@@ -1,3 +1,3 @@
 DOMAIN = "hikconnect"
 MANUFACTURER = "Hikvision"
-PLATFORMS = ["lock", "sensor"]
+PLATFORMS = ["lock", "sensor", "button"]
