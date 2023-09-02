@@ -133,6 +133,10 @@ class Lock(CoordinatorEntity, LockEntity):
         }
 
     @property
+    def entity_registry_enabled_default(self):
+        return bool(self._camera_info["is_shown"])
+
+    @property
     def assumed_state(self):
         return True
 
