@@ -78,6 +78,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             sw_version=device["version"],
         )
         for camera in device["cameras"]:
+            if not camera['is_shown']:
+                continue
             ha_camera_id = (DOMAIN, device["id"] + "-" + camera["id"])
             dr.async_get_or_create(
                 config_entry_id=entry.entry_id,
