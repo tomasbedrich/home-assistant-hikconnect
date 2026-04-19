@@ -1,11 +1,11 @@
 import logging
 
-from hikconnect.api import HikConnect
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .api import HikConnect
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)

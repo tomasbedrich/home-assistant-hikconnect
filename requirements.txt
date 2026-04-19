@@ -1,3 +1,2 @@
 homeassistant
 voluptuous
-hikconnect

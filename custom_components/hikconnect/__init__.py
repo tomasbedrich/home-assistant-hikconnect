@@ -2,17 +2,26 @@ import logging
 from datetime import timedelta
 
 import aiohttp
-from hikconnect.api import HikConnect
-from hikconnect.exceptions import HikConnectError, LoginError
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, MANUFACTURER, PLATFORMS
+from .api import HikConnect
+from .const import DOMAIN, MANUFACTURER, PLATFORMS, SERVICE_GET_STREAM_BOOTSTRAP
+from .exceptions import HikConnectError, LoginError
 
 _LOGGER = logging.getLogger(__name__)
+
+STREAM_BOOTSTRAP_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("device_serial"): cv.string,
+        vol.Optional("camera_id"): cv.string,
+    }
+)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
@@ -45,10 +54,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             for device_info in devices:
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
                 cameras = [c async for c in api.get_cameras(device_info["serial"])]
+                for camera in cameras:
+                    camera["stream_bootstrap"] = api.build_stream_bootstrap(
+                        device_info, camera
+                    )
                 device_info.update({"cameras": cameras})
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
             raise UpdateFailed(e) from e
+
+    async def async_handle_get_stream_bootstrap(call: ServiceCall):
+        device_serial = call.data.get("device_serial")
+        camera_id = call.data.get("camera_id")
+        cameras = []
+
+        for device_info in coordinator.data:
+            if device_serial and device_info["serial"] != device_serial:
+                continue
+            for camera_info in device_info["cameras"]:
+                if camera_id and camera_info["id"] != camera_id:
+                    continue
+                cameras.append(camera_info.get("stream_bootstrap") or api.build_stream_bootstrap(device_info, camera_info))
+
+        return {"cameras": cameras}
 
     # Refreshing device info can be relativelly infrequent, but...
     # BEWARE: Multiple people reported that they needed to restart the
@@ -94,6 +122,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         "api": api,
         "coordinator": coordinator,
     }
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_GET_STREAM_BOOTSTRAP,
+        async_handle_get_stream_bootstrap,
+        schema=STREAM_BOOTSTRAP_SERVICE_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
@@ -115,6 +150,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry):
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        hass.services.async_remove(DOMAIN, SERVICE_GET_STREAM_BOOTSTRAP)
         data = hass.data.pop(DOMAIN)
         await data["api"].close()
     return unload_ok

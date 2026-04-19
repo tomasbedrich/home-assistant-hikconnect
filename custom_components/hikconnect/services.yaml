@@ -1,0 +1,16 @@
+get_stream_bootstrap:
+  name: Get stream bootstrap
+  description: Returns the currently known live-view bootstrap metadata for Hik-Connect cameras.
+  fields:
+    device_serial:
+      name: Device serial
+      description: Filter result to a single Hik-Connect device serial.
+      example: Q03261055
+      selector:
+        text:
+    camera_id:
+      name: Camera ID
+      description: Filter result to a single Hik-Connect camera ID.
+      example: c797c9aed4e2434e8197279da0646719
+      selector:
+        text:

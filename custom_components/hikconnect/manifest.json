@@ -16,8 +16,6 @@
 		"custom_components.hikconnect",
 		"hikconnect"
 	],
-	"requirements": [
-		"hikconnect==1.2.1"
-	],
+	"requirements": [],
 	"version": "2.4.0"
 }
