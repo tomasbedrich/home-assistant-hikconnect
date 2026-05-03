@@ -1,6 +1,6 @@
 import logging
 
-from homeassistant.components.camera import Camera
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
 from .const import DOMAIN
+from .local_stream import build_internal_stream_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class HikConnectCamera(CoordinatorEntity, Camera):
     """
 
     _attr_content_type = "image/jpeg"
+    _attr_supported_features = CameraEntityFeature.STREAM
 
     def __init__(
         self,
@@ -115,6 +117,17 @@ class HikConnectCamera(CoordinatorEntity, Camera):
         local_sdk = bootstrap.get("local_sdk", {})
         vtm = bootstrap.get("vtm", {})
         kms = bootstrap.get("kms", {})
+        selected_candidates = self.hass.data[DOMAIN].get("selected_stream_candidates", {})
+        stream_candidates = bootstrap.get("stream_candidates", [])
+        selected_index = selected_candidates.get(self._camera_id, 0)
+        selected_kind = None
+        selected_source = None
+        if 0 <= selected_index < len(stream_candidates):
+            selected_kind = stream_candidates[selected_index].get("kind")
+            if selected_kind == "local_hik_bridge":
+                selected_source = build_internal_stream_url(self.hass, self._camera_id)
+            else:
+                selected_source = stream_candidates[selected_index].get("url")
 
         return {
             "device_serial": bootstrap.get("device_serial"),
@@ -123,6 +136,10 @@ class HikConnectCamera(CoordinatorEntity, Camera):
             "signal_status": bootstrap.get("signal_status"),
             "stream_transport": bootstrap.get("stream_transport"),
             "stream_biz_url": bootstrap.get("stream_biz_url"),
+            "stream_candidates": stream_candidates,
+            "selected_stream_candidate_index": selected_index,
+            "selected_stream_candidate_kind": selected_kind,
+            "selected_stream_source": selected_source,
             "local_ip": local_sdk.get("local_ip"),
             "local_cmd_port": local_sdk.get("local_cmd_port"),
             "local_stream_port": local_sdk.get("local_stream_port"),
@@ -134,6 +151,29 @@ class HikConnectCamera(CoordinatorEntity, Camera):
             "has_local_rtsp": bool(local_sdk.get("local_rtsp_port")),
             "experimental": bootstrap.get("experimental", True),
         }
+
+    async def stream_source(self):
+        camera_info = self._get_camera_info()
+        if not camera_info:
+            return None
+
+        bootstrap = camera_info.get("stream_bootstrap", {})
+        stream_candidates = bootstrap.get("stream_candidates", [])
+        if not stream_candidates:
+            return None
+
+        selected_candidates = self.hass.data[DOMAIN].get("selected_stream_candidates", {})
+        selected_index = selected_candidates.get(self._camera_id, 0)
+        if 0 <= selected_index < len(stream_candidates):
+            candidate = stream_candidates[selected_index]
+            if candidate.get("kind") == "local_hik_bridge":
+                return build_internal_stream_url(self.hass, self._camera_id)
+            return candidate["url"]
+
+        candidate = stream_candidates[0]
+        if candidate.get("kind") == "local_hik_bridge":
+            return build_internal_stream_url(self.hass, self._camera_id)
+        return candidate["url"]
 
     async def async_camera_image(self, width=None, height=None):
         camera_info = self._get_camera_info()

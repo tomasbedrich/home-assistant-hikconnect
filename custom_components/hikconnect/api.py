@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from aiohttp import ClientSession
 
 from .exceptions import DeviceOffline, LoginError
+from .local_stream import has_local_bridge_support
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +59,79 @@ class HikConnect:
     }
 
     @staticmethod
+    def _build_stream_candidates(device_info: dict, camera_info: dict) -> list[dict]:
+        connection = device_info.get("connection", {})
+        vtm = camera_info.get("vtm_info", {})
+        stream_biz_url = camera_info.get("stream_biz_url")
+
+        if not stream_biz_url:
+            return []
+
+        candidates = []
+        local_ip = connection.get("localIp")
+        local_rtsp_port = connection.get("localRtspPort")
+        local_stream_port = connection.get("localStreamPort")
+        vtm_domain = vtm.get("domain")
+        vtm_external_ip = vtm.get("externalIp")
+        vtm_port = vtm.get("port")
+
+        if has_local_bridge_support(
+            {
+                "local_sdk": {
+                    "local_ip": local_ip,
+                    "local_cmd_port": connection.get("localCmdPort"),
+                    "local_stream_port": local_stream_port,
+                }
+            }
+        ):
+            candidates.append(
+                {
+                    "kind": "local_hik_bridge",
+                    "url": f"hikconnect://local-bridge/{camera_info['id']}",
+                }
+            )
+
+        if local_ip and local_rtsp_port:
+            candidates.append(
+                {
+                    "kind": "local_rtsp",
+                    "url": f"rtsp://{local_ip}:{local_rtsp_port}/?{stream_biz_url}",
+                }
+            )
+
+        if local_ip and local_stream_port:
+            candidates.append(
+                {
+                    "kind": "local_sdk_rtsp_guess",
+                    "url": f"rtsp://{local_ip}:{local_stream_port}/?{stream_biz_url}",
+                }
+            )
+
+        if vtm_domain and vtm_port:
+            candidates.append(
+                {
+                    "kind": "vtm_rtsp_guess",
+                    "url": f"rtsp://{vtm_domain}:{vtm_port}/?{stream_biz_url}",
+                }
+            )
+            candidates.append(
+                {
+                    "kind": "vtm_rtsps_guess",
+                    "url": f"rtsps://{vtm_domain}:{vtm_port}/?{stream_biz_url}",
+                }
+            )
+
+        if vtm_external_ip and vtm_port:
+            candidates.append(
+                {
+                    "kind": "vtm_external_rtsp_guess",
+                    "url": f"rtsp://{vtm_external_ip}:{vtm_port}/?{stream_biz_url}",
+                }
+            )
+
+        return candidates
+
+    @staticmethod
     def build_stream_bootstrap(device_info: dict, camera_info: dict) -> dict:
         connection = device_info.get("connection", {})
         kms = device_info.get("kms", {})
@@ -72,6 +146,9 @@ class HikConnect:
             "signal_status": camera_info["signal_status"],
             "stream_transport": "hik_sdk",
             "stream_biz_url": camera_info.get("stream_biz_url"),
+            "stream_candidates": HikConnect._build_stream_candidates(
+                device_info, camera_info
+            ),
             "video_level": camera_info.get("video_level"),
             "video_quality_infos": camera_info.get("video_quality_infos", []),
             "local_sdk": {

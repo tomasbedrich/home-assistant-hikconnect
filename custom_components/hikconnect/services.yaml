@@ -14,3 +14,53 @@ get_stream_bootstrap:
       example: c797c9aed4e2434e8197279da0646719
       selector:
         text:
+
+get_stream_source:
+  name: Get stream source
+  description: Returns selected stream_source and all URL candidates for a camera.
+  fields:
+    device_serial:
+      name: Device serial
+      description: Filter result to a single Hik-Connect device serial.
+      example: Q03261055
+      selector:
+        text:
+    camera_id:
+      name: Camera ID
+      description: Filter result to a single Hik-Connect camera ID.
+      example: c797c9aed4e2434e8197279da0646719
+      selector:
+        text:
+
+select_stream_candidate:
+  name: Select stream candidate
+  description: Selects which candidate URL should be used by the camera entity as stream_source.
+  fields:
+    camera_id:
+      name: Camera ID
+      description: Camera identifier returned by Hik-Connect.
+      example: f3e8d2efb02c4f429132523178938547
+      required: true
+      selector:
+        text:
+    device_serial:
+      name: Device serial
+      description: Optional device serial filter.
+      example: Q03261055
+      selector:
+        text:
+    candidate_index:
+      name: Candidate index
+      description: Zero-based index in stream_candidates.
+      example: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          mode: box
+    candidate_kind:
+      name: Candidate kind
+      description: Alternative to candidate_index, for example vtm_rtsp_guess.
+      example: vtm_rtsp_guess
+      selector:
+        text:

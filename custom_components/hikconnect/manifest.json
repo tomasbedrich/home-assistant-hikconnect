@@ -2,20 +2,22 @@
 	"domain": "hikconnect",
 	"name": "Hik-Connect",
 	"codeowners": [
-		"@tomasbedrich"
+		"@piotrmilcarz"
 	],
 	"config_flow": true,
 	"dependencies": [
 		"network"
 	],
-	"documentation": "https://github.com/tomasbedrich/home-assistant-hikconnect",
+	"documentation": "https://github.com/piotrmilcarz/home-assistant-hikconnect",
 	"integration_type": "hub",
 	"iot_class": "cloud_polling",
-	"issue_tracker": "https://github.com/tomasbedrich/home-assistant-hikconnect/issues",
+	"issue_tracker": "https://github.com/piotrmilcarz/home-assistant-hikconnect/issues",
 	"loggers": [
 		"custom_components.hikconnect",
 		"hikconnect"
 	],
-	"requirements": [],
-	"version": "2.4.0"
+	"requirements": [
+		"pycryptodome>=3.20.0"
+	],
+	"version": "2.5.0"
 }
