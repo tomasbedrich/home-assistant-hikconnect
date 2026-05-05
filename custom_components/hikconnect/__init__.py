@@ -20,7 +20,12 @@ from .const import (
     SERVICE_GET_STREAM_SOURCE,
 )
 from .exceptions import HikConnectError, LoginError
-from .local_stream import HikConnectLocalStreamView, build_internal_stream_url
+from .local_stream import (
+    HikConnectLocalStreamAuthView,
+    HikConnectLocalStreamView,
+    build_authenticated_stream_url,
+    build_internal_stream_url,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -121,6 +126,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                     "camera_id": camera_info["id"],
                     "device_serial": device_info["serial"],
                     "stream_source": selected_source,
+                    "authenticated_stream_source": build_authenticated_stream_url(
+                        hass, camera_info["id"]
+                    ),
                     "selected_candidate_index": selected_index,
                     "selected_candidate_kind": selected_kind,
                     "stream_candidates": candidates,
@@ -246,6 +254,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         "stream_bridge_lookup": {},
     }
     hass.http.register_view(HikConnectLocalStreamView())
+    hass.http.register_view(HikConnectLocalStreamAuthView())
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_STREAM_BOOTSTRAP,

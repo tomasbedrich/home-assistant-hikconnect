@@ -389,6 +389,20 @@ def build_internal_stream_url(hass: HomeAssistant, camera_id: str) -> str:
     return f"{base_url.rstrip('/')}{path}"
 
 
+def build_authenticated_stream_url(hass: HomeAssistant, camera_id: str) -> str:
+    """Build a HA-authenticated stream URL (requires Bearer token/cookie)."""
+    path = f"/api/{DOMAIN}/stream_auth/{camera_id}"
+    try:
+        base_url = get_url(hass, prefer_external=False)
+    except NoURLAvailableError:
+        internal_url = getattr(hass.config, "internal_url", None)
+        if internal_url:
+            base_url = internal_url
+        else:
+            base_url = "http://127.0.0.1:8123"
+    return f"{base_url.rstrip('/')}{path}"
+
+
 def resolve_camera_bootstrap(hass: HomeAssistant, camera_id: str) -> Optional[dict]:
     coordinator = hass.data[DOMAIN]["coordinator"]
     for device_info in coordinator.data:
@@ -433,6 +447,49 @@ class HikConnectLocalStreamView(HomeAssistantView):
             pass
         except Exception as err:
             _LOGGER.warning("Local Hik stream failed for camera %s: %s", camera_id, err)
+        finally:
+            with contextlib.suppress(RuntimeError, ConnectionResetError):
+                await response.write_eof()
+
+        return response
+
+
+class HikConnectLocalStreamAuthView(HomeAssistantView):
+    """Same stream as token view, but protected by Home Assistant auth."""
+
+    url = f"/api/{DOMAIN}/stream_auth/{{camera_id}}"
+    name = f"api:{DOMAIN}:stream_auth"
+    requires_auth = True
+
+    async def get(self, request: web.Request, camera_id: str) -> web.StreamResponse:
+        hass: HomeAssistant = request.app["hass"]
+        bootstrap = resolve_camera_bootstrap(hass, camera_id)
+        if not bootstrap or not has_local_bridge_support(bootstrap):
+            raise web.HTTPNotFound
+
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "video/h264",
+                "Cache-Control": "no-store",
+                "Pragma": "no-cache",
+            },
+        )
+        await response.prepare(request)
+
+        bridge = HikLocalBridge(bootstrap)
+        try:
+            async for chunk in bridge.stream_annex_b():
+                await response.write(chunk)
+        except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
+            pass
+        except Exception as err:
+            _LOGGER.warning(
+                "Authenticated local Hik stream failed for camera %s: %s",
+                camera_id,
+                err,
+            )
         finally:
             with contextlib.suppress(RuntimeError, ConnectionResetError):
                 await response.write_eof()

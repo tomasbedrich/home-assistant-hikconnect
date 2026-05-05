@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
 from .const import DOMAIN
-from .local_stream import build_internal_stream_url
+from .local_stream import build_authenticated_stream_url, build_internal_stream_url
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -140,6 +140,9 @@ class HikConnectCamera(CoordinatorEntity, Camera):
             "selected_stream_candidate_index": selected_index,
             "selected_stream_candidate_kind": selected_kind,
             "selected_stream_source": selected_source,
+            "authenticated_stream_source": build_authenticated_stream_url(
+                self.hass, self._camera_id
+            ),
             "local_ip": local_sdk.get("local_ip"),
             "local_cmd_port": local_sdk.get("local_cmd_port"),
             "local_stream_port": local_sdk.get("local_stream_port"),
