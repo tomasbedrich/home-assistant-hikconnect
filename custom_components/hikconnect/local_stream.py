@@ -2,7 +2,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
-import secrets
+import re
 import struct
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
@@ -365,13 +365,43 @@ def has_local_bridge_support(bootstrap: dict) -> bool:
     )
 
 
+def _slugify_stream_name(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return slug or "camera"
+
+
+def resolve_device_and_camera_info(
+    hass: HomeAssistant, camera_id: str
+) -> tuple[Optional[dict], Optional[dict]]:
+    coordinator = hass.data[DOMAIN]["coordinator"]
+    for device_info in coordinator.data:
+        for camera_info in device_info["cameras"]:
+            if camera_info["id"] == camera_id:
+                return device_info, camera_info
+    return None, None
+
+
 def get_or_create_stream_token(hass: HomeAssistant, camera_id: str) -> str:
     tokens = hass.data[DOMAIN].setdefault("stream_bridge_tokens", {})
     token = tokens.get(camera_id)
     if token is None:
-        token = secrets.token_hex(16)
+        device_info, camera_info = resolve_device_and_camera_info(hass, camera_id)
+        device_name = device_info.get("name") if device_info else ""
+        camera_name = camera_info.get("name") if camera_info else camera_id
+        base_name = device_name or camera_name
+        base_slug = _slugify_stream_name(base_name)
+
+        lookup = hass.data[DOMAIN].setdefault("stream_bridge_lookup", {})
+        token = base_slug
+        if token in lookup and lookup[token] != camera_id:
+            token = f"{base_slug}_{_slugify_stream_name(camera_name)}"
+            suffix = 2
+            while token in lookup and lookup[token] != camera_id:
+                token = f"{base_slug}_{_slugify_stream_name(camera_name)}_{suffix}"
+                suffix += 1
+
         tokens[camera_id] = token
-        hass.data[DOMAIN].setdefault("stream_bridge_lookup", {})[token] = camera_id
+        lookup[token] = camera_id
     return token
 
 
@@ -391,7 +421,8 @@ def build_internal_stream_url(hass: HomeAssistant, camera_id: str) -> str:
 
 def build_authenticated_stream_url(hass: HomeAssistant, camera_id: str) -> str:
     """Build a HA-authenticated stream URL (requires Bearer token/cookie)."""
-    path = f"/api/{DOMAIN}/stream_auth/{camera_id}"
+    name = get_or_create_stream_token(hass, camera_id)
+    path = f"/api/{DOMAIN}/stream_auth/{name}"
     try:
         base_url = get_url(hass, prefer_external=False)
     except NoURLAvailableError:
@@ -404,23 +435,20 @@ def build_authenticated_stream_url(hass: HomeAssistant, camera_id: str) -> str:
 
 
 def resolve_camera_bootstrap(hass: HomeAssistant, camera_id: str) -> Optional[dict]:
-    coordinator = hass.data[DOMAIN]["coordinator"]
-    for device_info in coordinator.data:
-        for camera_info in device_info["cameras"]:
-            if camera_info["id"] != camera_id:
-                continue
-            return camera_info.get("stream_bootstrap")
-    return None
+    _, camera_info = resolve_device_and_camera_info(hass, camera_id)
+    if camera_info is None:
+        return None
+    return camera_info.get("stream_bootstrap")
 
 
 class HikConnectLocalStreamView(HomeAssistantView):
-    url = f"/api/{DOMAIN}/stream/{{token}}"
+    url = f"/api/{DOMAIN}/stream/{{name}}"
     name = f"api:{DOMAIN}:stream"
     requires_auth = False
 
-    async def get(self, request: web.Request, token: str) -> web.StreamResponse:
+    async def get(self, request: web.Request, name: str) -> web.StreamResponse:
         hass: HomeAssistant = request.app["hass"]
-        camera_id = hass.data[DOMAIN].get("stream_bridge_lookup", {}).get(token)
+        camera_id = hass.data[DOMAIN].get("stream_bridge_lookup", {}).get(name)
         if camera_id is None:
             raise web.HTTPNotFound
 
@@ -457,12 +485,16 @@ class HikConnectLocalStreamView(HomeAssistantView):
 class HikConnectLocalStreamAuthView(HomeAssistantView):
     """Same stream as token view, but protected by Home Assistant auth."""
 
-    url = f"/api/{DOMAIN}/stream_auth/{{camera_id}}"
+    url = f"/api/{DOMAIN}/stream_auth/{{name}}"
     name = f"api:{DOMAIN}:stream_auth"
     requires_auth = True
 
-    async def get(self, request: web.Request, camera_id: str) -> web.StreamResponse:
+    async def get(self, request: web.Request, name: str) -> web.StreamResponse:
         hass: HomeAssistant = request.app["hass"]
+        camera_id = hass.data[DOMAIN].get("stream_bridge_lookup", {}).get(name)
+        if camera_id is None:
+            raise web.HTTPNotFound
+
         bootstrap = resolve_camera_bootstrap(hass, camera_id)
         if not bootstrap or not has_local_bridge_support(bootstrap):
             raise web.HTTPNotFound
