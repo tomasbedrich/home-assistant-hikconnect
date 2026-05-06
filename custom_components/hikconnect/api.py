@@ -57,6 +57,7 @@ class HikConnect:
         "devType": "device_type",
         "lockNum": "lock_number",
     }
+    CALLING_FALLBACK_RING_SECONDS = 20
 
     @staticmethod
     def _build_stream_candidates(device_info: dict, camera_info: dict) -> list[dict]:
@@ -180,6 +181,7 @@ class HikConnect:
     def __init__(self):
         self._refresh_session_id = None
         self.login_valid_until = None
+        self._calling_fallback_state = {}
         self.client = _HikConnectClient()
 
     async def login(self, username: str, password: str):
@@ -325,6 +327,19 @@ class HikConnect:
             await res.json()
 
     async def get_call_status(self, device_serial: str):
+        try:
+            return await self._get_call_status_legacy(device_serial)
+        except DeviceOffline:
+            raise
+        except Exception as err:
+            log.debug(
+                "Legacy call status endpoint failed for %s, using calling fallback: %s",
+                device_serial,
+                err,
+            )
+            return await self._get_call_status_from_calling_api(device_serial)
+
+    async def _get_call_status_legacy(self, device_serial: str):
         async with self.client.get(
             f"{self.BASE_URL}/v3/devconfig/v1/call/{device_serial}/status"
         ) as res:
@@ -343,6 +358,83 @@ class HikConnect:
                 continue
 
         return {"status": status, "info": info}
+
+    async def _get_call_status_from_calling_api(self, device_serial: str):
+        now = datetime.datetime.now()
+        state = self._calling_fallback_state.setdefault(
+            device_serial,
+            {
+                "last_calling_id": None,
+                "last_count": None,
+                "ringing_until": None,
+            },
+        )
+
+        count = await self._get_calling_unread_count()
+        latest = await self._get_latest_calling_event(device_serial)
+
+        latest_id = latest.get("callingId") if latest else None
+        if latest_id and latest_id != state["last_calling_id"]:
+            state["last_calling_id"] = latest_id
+            state["ringing_until"] = now + datetime.timedelta(
+                seconds=self.CALLING_FALLBACK_RING_SECONDS
+            )
+
+        if count is not None and state["last_count"] is not None and count > state["last_count"]:
+            state["ringing_until"] = now + datetime.timedelta(
+                seconds=self.CALLING_FALLBACK_RING_SECONDS
+            )
+        state["last_count"] = count
+
+        ringing_until = state.get("ringing_until")
+        status = "ringing" if ringing_until and now < ringing_until else "idle"
+
+        info = {
+            "fallback_source": "calling_api",
+            "unread_count": count,
+        }
+        if latest:
+            info["latest_calling_id"] = latest.get("callingId")
+            info["latest_calling_time"] = latest.get("callingTime")
+            info["latest_calling_message"] = latest.get("callingMessage")
+            info["latest_calling_status"] = latest.get("callingStatus")
+            info["latest_msg_status"] = latest.get("msgStatus")
+
+            custom_info = latest.get("customInfo")
+            if custom_info:
+                try:
+                    info["custom_info"] = json.loads(custom_info)
+                except (TypeError, json.JSONDecodeError):
+                    info["custom_info"] = custom_info
+
+        return {"status": status, "info": info}
+
+    async def _get_calling_unread_count(self):
+        async with self.client.get(
+            f"{self.BASE_URL}/v3/calling/countByUser?msgStatus=0"
+        ) as res:
+            res_json = await res.json()
+
+        meta = res_json.get("meta", {})
+        if meta.get("code") != 200:
+            raise RuntimeError(f"Unexpected calling count response: {res_json}")
+
+        return res_json.get("count")
+
+    async def _get_latest_calling_event(self, device_serial: str):
+        least_time = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime(
+            "%Y-%m-%d 00:00:00"
+        )
+        async with self.client.get(
+            f"{self.BASE_URL}/v3/calling/{device_serial}/list"
+            f"?leastTime={least_time}&msgStatus=-1&pageSize=1"
+        ) as res:
+            res_json = await res.json()
+
+        data = res_json.get("data")
+        if isinstance(data, list) and data:
+            return data[0]
+        return None
 
     async def answer_call(self, device_serial: str):
         async with self.client.put(
