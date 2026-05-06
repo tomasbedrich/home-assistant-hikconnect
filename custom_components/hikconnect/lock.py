@@ -1,6 +1,5 @@
 import logging
 
-from hikconnect.api import HikConnect
 from homeassistant.components.lock import LockEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -11,6 +10,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
 )
 
+from .api import HikConnect
 from .const import DOMAIN
 
 DOOR_LATCH_UNLOCKED_FOR = 5  # seconds

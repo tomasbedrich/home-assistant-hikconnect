@@ -4,11 +4,12 @@ import logging
 from datetime import timedelta
 
 import aiohttp
-from hikconnect.api import HikConnect
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .api import HikConnect
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ def _patch_hikconnect_logger():
     def log_filter(record: logging.LogRecord):
         return not (record.levelno == logging.INFO and "call status" in record.msg)
 
-    hikconnect_logger = logging.getLogger("hikconnect.api")
+    hikconnect_logger = logging.getLogger("custom_components.hikconnect.api")
     if hikconnect_logger.getEffectiveLevel() == logging.INFO:
         hikconnect_logger.addFilter(log_filter)
 

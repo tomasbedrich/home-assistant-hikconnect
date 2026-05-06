@@ -1,12 +1,12 @@
 import logging
 import urllib.parse
 
-import voluptuous as vol
-from hikconnect.api import HikConnect
-from hikconnect.exceptions import LoginError
 from homeassistant import config_entries, core
+import voluptuous as vol
 
+from .api import HikConnect
 from .const import DOMAIN
+from .exceptions import LoginError
 
 _LOGGER = logging.getLogger(__name__)
 
