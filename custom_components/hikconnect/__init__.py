@@ -67,8 +67,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     await coordinator.async_config_entry_first_refresh()
 
     dr = device_registry.async_get(hass)
+    expected_identifiers: set[tuple[str, str]] = set()
     for device in coordinator.data:
         ha_device_id = (DOMAIN, device["id"])
+        expected_identifiers.add(ha_device_id)
         dr.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={ha_device_id},
@@ -78,15 +80,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             sw_version=device["version"],
         )
         for camera in device["cameras"]:
-            if not camera['is_shown']:
+            # Skip cameras that are hidden or have no controllable locks.
+            # Indoor units report many phantom "camera" channels with no
+            # entities attached; registering them creates orphan devices.
+            # see: https://github.com/tomasbedrich/home-assistant-hikconnect/issues/60
+            if not camera["is_shown"]:
+                continue
+            if not device["locks"].get(camera["channel_number"], 0):
                 continue
             ha_camera_id = (DOMAIN, device["id"] + "-" + camera["id"])
+            expected_identifiers.add(ha_camera_id)
             dr.async_get_or_create(
                 config_entry_id=entry.entry_id,
                 identifiers={ha_camera_id},
                 name=camera["name"],
                 manufacturer=MANUFACTURER,
                 via_device=ha_device_id,
+            )
+
+    # Clean up devices created by previous versions that no longer correspond
+    # to a real device or a camera with locks.
+    for ha_device in device_registry.async_entries_for_config_entry(
+        dr, entry.entry_id
+    ):
+        if not any(ident in expected_identifiers for ident in ha_device.identifiers):
+            dr.async_update_device(
+                ha_device.id, remove_config_entry_id=entry.entry_id
             )
 
     # TODO handle multiple instances of the same integration
