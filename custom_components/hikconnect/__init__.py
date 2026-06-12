@@ -154,9 +154,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
                 cameras = [c async for c in api.get_cameras(device_info["serial"])]
                 device_info.update({"cameras": cameras})
-                # If the extras endpoint failed or omitted this serial,
-                # surface ``None`` so the diagnostic sensors mark themselves
-                # unavailable instead of misreporting a connected device.
+                # Fall back to None values so missing fields read as unavailable.
                 device_info.update(extras.get(device_info["serial"], empty_extras))
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
