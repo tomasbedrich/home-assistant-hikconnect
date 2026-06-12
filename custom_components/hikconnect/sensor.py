@@ -5,8 +5,12 @@ from datetime import timedelta
 
 import aiohttp
 from hikconnect.api import HikConnect
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -49,6 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         new_entities.append(CallStatusSensor(api, device_info))
         new_entities.append(LocalIpSensor(coordinator, index))
         new_entities.append(WanIpSensor(coordinator, index))
+        new_entities.append(WifiSignalSensor(coordinator, index))
 
     if new_entities:
         async_add_entities(new_entities, update_before_add=True)
@@ -175,3 +180,15 @@ class WanIpSensor(_DeviceFieldSensor):
     _suffix = "wan-ip"
     _icon = "mdi:wan"
     _name_suffix = "WAN IP"
+
+
+class WifiSignalSensor(_DeviceFieldSensor):
+    """WiFi signal strength reported by the device (0-100)."""
+
+    _field = "wifi_signal"
+    _suffix = "wifi-signal"
+    _icon = "mdi:wifi-strength-3"
+    _name_suffix = "WiFi signal"
+
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT

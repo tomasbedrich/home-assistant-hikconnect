@@ -89,10 +89,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 is_online = None
             else:
                 is_online = status_code == 1
+            wifi_signal = wifi.get("signal")
+            if not isinstance(wifi_signal, int):
+                wifi_signal = None
+            upgrade_available = status.get("upgradeAvailable")
+            if upgrade_available is None:
+                update_available = None
+            else:
+                update_available = bool(upgrade_available)
             result[serial] = {
                 "local_ip": local_ip,
                 "wan_ip": wan_ip,
                 "is_online": is_online,
+                "wifi_signal": wifi_signal,
+                "update_available": update_available,
             }
         return result
 
@@ -102,7 +112,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             _LOGGER.info("Getting devices")
             devices = [device async for device in api.get_devices()]
             extras = await async_fetch_pagelist_extras()
-            empty_extras = {"local_ip": None, "wan_ip": None, "is_online": None}
+            empty_extras = {
+                "local_ip": None,
+                "wan_ip": None,
+                "is_online": None,
+                "wifi_signal": None,
+                "update_available": None,
+            }
             for device_info in devices:
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
                 cameras = [c async for c in api.get_cameras(device_info["serial"])]
