@@ -37,15 +37,80 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 # TODO add config_flow reauthenticate handler
                 raise ConfigEntryAuthFailed from e
 
+    async def async_fetch_pagelist_extras() -> dict:
+        """Fetch CONNECTION/STATUS info that the hikconnect lib does not expose.
+
+        The /devices/pagelist endpoint already returns these blocks per serial;
+        we issue an extra request because the underlying library only yields
+        a small subset of fields. Returns a mapping of serial -> dict with
+        keys: local_ip, wan_ip, is_online.
+        """
+        url = (
+            f"{api.BASE_URL}/v3/userdevices/v1/devices/pagelist"
+            "?groupId=-1&limit=50&offset=0&filter=CONNECTION,STATUS,WIFI"
+        )
+        result: dict = {}
+        try:
+            async with api.client.get(url) as res:
+                payload = await res.json()
+        except (aiohttp.ClientError, ValueError) as e:
+            _LOGGER.debug("Failed to fetch pagelist extras: %s", e)
+            return result
+        connections = payload.get("connectionInfos") or {}
+        statuses = payload.get("statusInfos") or {}
+        wifis = payload.get("wifiInfos") or {}
+        _LOGGER.debug(
+            "pagelist extras: connectionInfos serials=%s, statusInfos serials=%s, wifiInfos serials=%s",
+            list(connections), list(statuses), list(wifis),
+        )
+        for serial in {*connections, *statuses, *wifis}:
+            conn = connections.get(serial) or {}
+            wifi = wifis.get(serial) or {}
+            status = statuses.get(serial) or {}
+            _LOGGER.debug(
+                "pagelist extras for %s: CONNECTION=%s STATUS=%s WIFI=%s",
+                serial, conn, status, wifi,
+            )
+            local_ip = conn.get("localIp")
+            if not local_ip or local_ip == "0.0.0.0":
+                local_ip = wifi.get("address")
+            if local_ip == "0.0.0.0":
+                local_ip = None
+            wan_ip = conn.get("netIp") or None
+            if wan_ip == "0.0.0.0":
+                wan_ip = None
+            # Hik-Connect ``globalStatus`` codes (mirroring EZVIZ):
+            #   1 == online, 2 == sleeping, 0/missing == offline.
+            # Use ``None`` when the field is missing so the connectivity
+            # sensor reports "unavailable" instead of falsely flagging the
+            # device as offline.
+            status_code = status.get("globalStatus")
+            if status_code is None:
+                is_online = None
+            else:
+                is_online = status_code == 1
+            result[serial] = {
+                "local_ip": local_ip,
+                "wan_ip": wan_ip,
+                "is_online": is_online,
+            }
+        return result
+
     async def async_update():
         try:
             await relogin_if_needed()
             _LOGGER.info("Getting devices")
             devices = [device async for device in api.get_devices()]
+            extras = await async_fetch_pagelist_extras()
+            empty_extras = {"local_ip": None, "wan_ip": None, "is_online": None}
             for device_info in devices:
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
                 cameras = [c async for c in api.get_cameras(device_info["serial"])]
                 device_info.update({"cameras": cameras})
+                # If the extras endpoint failed or omitted this serial,
+                # surface ``None`` so the diagnostic sensors mark themselves
+                # unavailable instead of misreporting a connected device.
+                device_info.update(extras.get(device_info["serial"], empty_extras))
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
             raise UpdateFailed(e) from e
@@ -57,12 +122,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # and `api.is_refresh_login_needed()` => let's update it more often
     # than once per hour.
     # see: https://github.com/tomasbedrich/home-assistant-hikconnect/issues/27
+    # The same poll also refreshes the connectivity / local-IP / WAN-IP
+    # diagnostic sensors, so we keep the interval short enough that an
+    # offline device shows up within a few minutes.
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
         name=DOMAIN,
         update_method=async_update,
-        update_interval=timedelta(minutes=30),
+        update_interval=timedelta(minutes=5),
     )
     await coordinator.async_config_entry_first_refresh()
 
