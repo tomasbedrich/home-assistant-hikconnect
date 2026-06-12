@@ -39,12 +39,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 raise ConfigEntryAuthFailed from e
 
     async def async_fetch_pagelist_extras() -> dict:
-        """Fetch CONNECTION/STATUS info that the hikconnect lib does not expose.
+        """Fetch CONNECTION/STATUS/WIFI fields the hikconnect lib drops.
 
-        The /devices/pagelist endpoint already returns these blocks per serial;
-        we issue an extra request because the underlying library only yields
-        a small subset of fields. Returns a mapping of serial -> dict with
-        keys: local_ip, wan_ip, is_online.
+        Returns serial -> dict with local_ip, wan_ip, is_online,
+        wifi_signal, update_available.
         """
         result: dict = {}
         connections: dict = {}
