@@ -24,9 +24,9 @@ async def async_setup_entry(
     coordinator: DataUpdateCoordinator = hass.data[DOMAIN]["coordinator"]
 
     new_entities: list[BinarySensorEntity] = []
-    for index, _ in enumerate(coordinator.data):
-        new_entities.append(ConnectivitySensor(coordinator, index))
-        new_entities.append(UpdateAvailableSensor(coordinator, index))
+    for device_info in coordinator.data:
+        new_entities.append(ConnectivitySensor(coordinator, device_info["id"]))
+        new_entities.append(UpdateAvailableSensor(coordinator, device_info["id"]))
     if new_entities:
         async_add_entities(new_entities)
 
@@ -41,21 +41,22 @@ class _CoordinatorBinarySensor(CoordinatorEntity, BinarySensorEntity):
     _suffix: str = ""
     _name_suffix: str = ""
 
-    def __init__(self, coordinator: DataUpdateCoordinator, device_index: int):
+    def __init__(self, coordinator: DataUpdateCoordinator, device_id: str):
         super().__init__(coordinator)
-        self._device_index = device_index
+        self._device_id = device_id
+        self._attr_unique_id = "-".join((DOMAIN, device_id, self._suffix))
 
     @property
     def _device_info_data(self) -> dict:
-        return self.coordinator.data[self._device_index]
+        for device in self.coordinator.data or []:
+            if device.get("id") == self._device_id:
+                return device
+        return {}
 
     @property
     def name(self):
-        return f"{self._device_info_data['name']} {self._name_suffix}"
-
-    @property
-    def unique_id(self):
-        return "-".join((DOMAIN, self._device_info_data["id"], self._suffix))
+        name = self._device_info_data.get("name") or self._device_id
+        return f"{name} {self._name_suffix}"
 
     @property
     def is_on(self) -> bool:
@@ -73,7 +74,7 @@ class _CoordinatorBinarySensor(CoordinatorEntity, BinarySensorEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, self._device_info_data["id"])},
+            "identifiers": {(DOMAIN, self._device_id)},
         }
 
 

@@ -49,11 +49,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     _patch_hikconnect_logger()
 
     new_entities = []
-    for index, device_info in enumerate(coordinator.data):
+    for device_info in coordinator.data:
         new_entities.append(CallStatusSensor(api, device_info))
-        new_entities.append(LocalIpSensor(coordinator, index))
-        new_entities.append(WanIpSensor(coordinator, index))
-        new_entities.append(WifiSignalSensor(coordinator, index))
+        new_entities.append(LocalIpSensor(coordinator, device_info["id"]))
+        new_entities.append(WanIpSensor(coordinator, device_info["id"]))
+        new_entities.append(WifiSignalSensor(coordinator, device_info["id"]))
 
     if new_entities:
         async_add_entities(new_entities, update_before_add=True)
@@ -127,21 +127,22 @@ class _DeviceFieldSensor(CoordinatorEntity, SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator: DataUpdateCoordinator, device_index: int):
+    def __init__(self, coordinator: DataUpdateCoordinator, device_id: str):
         super().__init__(coordinator)
-        self._device_index = device_index
+        self._device_id = device_id
+        self._attr_unique_id = "-".join((DOMAIN, device_id, self._suffix))
 
     @property
     def _device_info_data(self) -> dict:
-        return self.coordinator.data[self._device_index]
+        for device in self.coordinator.data or []:
+            if device.get("id") == self._device_id:
+                return device
+        return {}
 
     @property
     def name(self):
-        return f"{self._device_info_data['name']} {self._name_suffix}"
-
-    @property
-    def unique_id(self):
-        return "-".join((DOMAIN, self._device_info_data["id"], self._suffix))
+        name = self._device_info_data.get("name") or self._device_id
+        return f"{name} {self._name_suffix}"
 
     @property
     def native_value(self):
@@ -156,7 +157,7 @@ class _DeviceFieldSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self):
         return {
-            "identifiers": {(DOMAIN, self._device_info_data["id"])},
+            "identifiers": {(DOMAIN, self._device_id)},
         }
 
     @property

@@ -46,20 +46,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         a small subset of fields. Returns a mapping of serial -> dict with
         keys: local_ip, wan_ip, is_online.
         """
-        url = (
-            f"{api.BASE_URL}/v3/userdevices/v1/devices/pagelist"
-            "?groupId=-1&limit=50&offset=0&filter=CONNECTION,STATUS,WIFI"
-        )
         result: dict = {}
-        try:
-            async with api.client.get(url) as res:
-                payload = await res.json()
-        except (aiohttp.ClientError, ValueError) as e:
-            _LOGGER.debug("Failed to fetch pagelist extras: %s", e)
-            return result
-        connections = payload.get("connectionInfos") or {}
-        statuses = payload.get("statusInfos") or {}
-        wifis = payload.get("wifiInfos") or {}
+        connections: dict = {}
+        statuses: dict = {}
+        wifis: dict = {}
+        limit, offset = 50, 0
+        # Mirror the lib's pagination so accounts with more than 50 devices
+        # still get extras for every page.
+        while True:
+            url = (
+                f"{api.BASE_URL}/v3/userdevices/v1/devices/pagelist"
+                f"?groupId=-1&limit={limit}&offset={offset}"
+                "&filter=CONNECTION,STATUS,WIFI"
+            )
+            try:
+                async with api.client.get(url) as res:
+                    payload = await res.json()
+            except (aiohttp.ClientError, ValueError) as e:
+                _LOGGER.debug("Failed to fetch pagelist extras: %s", e)
+                return result
+            connections.update(payload.get("connectionInfos") or {})
+            statuses.update(payload.get("statusInfos") or {})
+            wifis.update(payload.get("wifiInfos") or {})
+            page = payload.get("page") or {}
+            if not page.get("hasNext"):
+                break
+            offset += limit
         _LOGGER.debug(
             "pagelist extras: connectionInfos serials=%s, statusInfos serials=%s, wifiInfos serials=%s",
             list(connections), list(statuses), list(wifis),
@@ -73,12 +85,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 serial, conn, status, wifi,
             )
             local_ip = conn.get("localIp")
-            if not local_ip or local_ip == "0.0.0.0":
+            if not isinstance(local_ip, str) or not local_ip or local_ip == "0.0.0.0":
                 local_ip = wifi.get("address")
-            if local_ip == "0.0.0.0":
+            if not isinstance(local_ip, str) or local_ip == "0.0.0.0":
                 local_ip = None
-            wan_ip = conn.get("netIp") or None
-            if wan_ip == "0.0.0.0":
+            wan_ip = conn.get("netIp")
+            if not isinstance(wan_ip, str) or not wan_ip or wan_ip == "0.0.0.0":
                 wan_ip = None
             # Hik-Connect ``globalStatus`` codes (mirroring EZVIZ):
             #   1 == online, 2 == sleeping, 0/missing == offline.
