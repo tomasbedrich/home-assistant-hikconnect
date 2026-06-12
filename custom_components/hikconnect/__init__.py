@@ -110,6 +110,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 update_available = None
             else:
                 update_available = bool(upgrade_available)
+            # When the device is not actively reporting to the cloud the
+            # IP and signal values are stale (the cloud keeps the last
+            # known ones around for hours). Drop them so the sensors go
+            # unavailable instead of showing a value that no longer holds.
+            if not is_online:
+                local_ip = None
+                wan_ip = None
+                wifi_signal = None
             result[serial] = {
                 "local_ip": local_ip,
                 "wan_ip": wan_ip,
