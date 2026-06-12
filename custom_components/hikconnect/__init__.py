@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import timedelta
 
@@ -110,7 +111,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         try:
             await relogin_if_needed()
             _LOGGER.info("Getting devices")
-            devices = [device async for device in api.get_devices()]
+            # Skip devices with malformed payload instead of aborting
+            # the whole list - see issue #62.
+            devices = []
+            it = api.get_devices()
+            while True:
+                try:
+                    device = await it.__anext__()
+                except StopAsyncIteration:
+                    break
+                except json.JSONDecodeError as e:
+                    _LOGGER.warning("Skipping device with malformed data: %s", e)
+                    continue
+                devices.append(device)
             extras = await async_fetch_pagelist_extras()
             empty_extras = {
                 "local_ip": None,
