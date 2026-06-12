@@ -38,84 +38,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 # TODO add config_flow reauthenticate handler
                 raise ConfigEntryAuthFailed from e
 
-    async def async_fetch_pagelist_extras() -> dict:
-        """Fetch CONNECTION/STATUS/WIFI fields the hikconnect lib drops.
-
-        Returns serial -> dict with local_ip, wan_ip, is_online,
-        wifi_signal, update_available.
-        """
-        result: dict = {}
-        connections: dict = {}
-        statuses: dict = {}
-        wifis: dict = {}
-        limit, offset = 50, 0
-        while True:
-            url = (
-                f"{api.BASE_URL}/v3/userdevices/v1/devices/pagelist"
-                f"?groupId=-1&limit={limit}&offset={offset}"
-                "&filter=CONNECTION,STATUS,WIFI"
-            )
-            try:
-                async with api.client.get(url) as res:
-                    payload = await res.json()
-            except (aiohttp.ClientError, ValueError) as e:
-                _LOGGER.debug("Failed to fetch pagelist extras: %s", e)
-                return result
-            connections.update(payload.get("connectionInfos") or {})
-            statuses.update(payload.get("statusInfos") or {})
-            wifis.update(payload.get("wifiInfos") or {})
-            page = payload.get("page") or {}
-            if not page.get("hasNext"):
-                break
-            offset += limit
-        _LOGGER.debug(
-            "pagelist extras: connectionInfos serials=%s, statusInfos serials=%s, wifiInfos serials=%s",
-            list(connections), list(statuses), list(wifis),
-        )
-        for serial in {*connections, *statuses, *wifis}:
-            conn = connections.get(serial) or {}
-            wifi = wifis.get(serial) or {}
-            status = statuses.get(serial) or {}
-            _LOGGER.debug(
-                "pagelist extras for %s: CONNECTION=%s STATUS=%s WIFI=%s",
-                serial, conn, status, wifi,
-            )
-            local_ip = conn.get("localIp")
-            if not isinstance(local_ip, str) or not local_ip or local_ip == "0.0.0.0":
-                local_ip = wifi.get("address")
-            if not isinstance(local_ip, str) or local_ip == "0.0.0.0":
-                local_ip = None
-            wan_ip = conn.get("netIp")
-            if not isinstance(wan_ip, str) or not wan_ip or wan_ip == "0.0.0.0":
-                wan_ip = None
-            # globalStatus: 1=online, 2=sleep, 0/missing=offline.
-            status_code = status.get("globalStatus")
-            if status_code is None:
-                is_online = None
-            else:
-                is_online = status_code == 1
-            wifi_signal = wifi.get("signal")
-            if not isinstance(wifi_signal, int):
-                wifi_signal = None
-            upgrade_available = status.get("upgradeAvailable")
-            if upgrade_available is None:
-                update_available = None
-            else:
-                update_available = bool(upgrade_available)
-            # Cloud keeps stale IP/signal after device drops; clear them.
-            if not is_online:
-                local_ip = None
-                wan_ip = None
-                wifi_signal = None
-            result[serial] = {
-                "local_ip": local_ip,
-                "wan_ip": wan_ip,
-                "is_online": is_online,
-                "wifi_signal": wifi_signal,
-                "update_available": update_available,
-            }
-        return result
-
     async def async_update():
         try:
             await relogin_if_needed()
@@ -132,19 +54,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                     _LOGGER.warning("Skipping device with malformed data: %s", e)
                     continue
                 devices.append(device)
-            extras = await async_fetch_pagelist_extras()
-            empty_extras = {
-                "local_ip": None,
-                "wan_ip": None,
-                "is_online": None,
-                "wifi_signal": None,
-                "update_available": None,
-            }
             for device_info in devices:
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
                 cameras = [c async for c in api.get_cameras(device_info["serial"])]
                 device_info.update({"cameras": cameras})
-                device_info.update(extras.get(device_info["serial"], empty_extras))
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
             raise UpdateFailed(e) from e
