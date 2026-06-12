@@ -122,8 +122,7 @@ class _DeviceFieldSensor(CoordinatorEntity, SensorEntity):
     _icon: str = ""
     _name_suffix: str = ""
 
-    # Diagnostic sensors are off by default - the cloud values are useful
-    # for troubleshooting but rarely needed in dashboards.
+    # Diagnostic, off by default.
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
@@ -150,8 +149,6 @@ class _DeviceFieldSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        # Mark unavailable when the cloud did not surface this field
-        # (e.g. the extras request failed or the device omitted it).
         return super().available and self.native_value is not None
 
     @property

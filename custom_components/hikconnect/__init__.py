@@ -49,8 +49,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         statuses: dict = {}
         wifis: dict = {}
         limit, offset = 50, 0
-        # Mirror the lib's pagination so accounts with more than 50 devices
-        # still get extras for every page.
         while True:
             url = (
                 f"{api.BASE_URL}/v3/userdevices/v1/devices/pagelist"
@@ -90,11 +88,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             wan_ip = conn.get("netIp")
             if not isinstance(wan_ip, str) or not wan_ip or wan_ip == "0.0.0.0":
                 wan_ip = None
-            # Hik-Connect ``globalStatus`` codes (mirroring EZVIZ):
-            #   1 == online, 2 == sleeping, 0/missing == offline.
-            # Use ``None`` when the field is missing so the connectivity
-            # sensor reports "unavailable" instead of falsely flagging the
-            # device as offline.
+            # globalStatus: 1=online, 2=sleep, 0/missing=offline.
             status_code = status.get("globalStatus")
             if status_code is None:
                 is_online = None
@@ -108,10 +102,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 update_available = None
             else:
                 update_available = bool(upgrade_available)
-            # When the device is not actively reporting to the cloud the
-            # IP and signal values are stale (the cloud keeps the last
-            # known ones around for hours). Drop them so the sensors go
-            # unavailable instead of showing a value that no longer holds.
+            # Cloud keeps stale IP/signal after device drops; clear them.
             if not is_online:
                 local_ip = None
                 wan_ip = None
@@ -129,8 +120,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         try:
             await relogin_if_needed()
             _LOGGER.info("Getting devices")
-            # Skip devices with malformed payload instead of aborting
-            # the whole list - see issue #62.
+            # Skip devices with malformed payload - see #62.
             devices = []
             it = api.get_devices()
             while True:
@@ -154,7 +144,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
                 cameras = [c async for c in api.get_cameras(device_info["serial"])]
                 device_info.update({"cameras": cameras})
-                # Fall back to None values so missing fields read as unavailable.
                 device_info.update(extras.get(device_info["serial"], empty_extras))
             return devices
         except (HikConnectError, aiohttp.ClientError) as e:
@@ -167,9 +156,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     # and `api.is_refresh_login_needed()` => let's update it more often
     # than once per hour.
     # see: https://github.com/tomasbedrich/home-assistant-hikconnect/issues/27
-    # The same poll also refreshes the connectivity / local-IP / WAN-IP
-    # diagnostic sensors, so we keep the interval short enough that an
-    # offline device shows up within a few minutes.
     coordinator = DataUpdateCoordinator(
         hass,
         _LOGGER,
@@ -193,9 +179,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             sw_version=device["version"],
         )
         for camera in device["cameras"]:
-            # Skip cameras that are hidden or have no controllable locks.
-            # Indoor units report many phantom "camera" channels with no
-            # entities attached; registering them creates orphan devices.
             # see: https://github.com/tomasbedrich/home-assistant-hikconnect/issues/60
             if not camera["is_shown"]:
                 continue
@@ -211,8 +194,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 via_device=ha_device_id,
             )
 
-    # Clean up devices created by previous versions that no longer correspond
-    # to a real device or a camera with locks.
+    # Drop orphan devices created by previous versions.
     for ha_device in device_registry.async_entries_for_config_entry(
         dr, entry.entry_id
     ):

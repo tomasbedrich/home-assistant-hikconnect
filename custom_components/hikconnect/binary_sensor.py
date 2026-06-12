@@ -64,8 +64,6 @@ class _CoordinatorBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        # Mark unavailable when the cloud did not surface this field so we
-        # do not flip the sensor to its "off" state while data is missing.
         return (
             super().available
             and self._device_info_data.get(self._field) is not None
@@ -79,14 +77,7 @@ class _CoordinatorBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
 
 class ConnectivitySensor(_CoordinatorBinarySensor):
-    """
-    Reports whether the device is online and reachable to the Hik-Connect cloud.
-
-    Backed by the ``statusInfos[serial].globalStatus`` field of the
-    /devices/pagelist response. Hik-Connect reports ``1`` when the device
-    is online; ``0`` (offline) and ``2`` (sleeping) are treated as not
-    connected.
-    """
+    """Online status from statusInfos.globalStatus (1=online)."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _field = "is_online"
