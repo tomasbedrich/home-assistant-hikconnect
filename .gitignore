@@ -5,6 +5,3 @@ __pycache__
 .ipynb_checkpoints
 pip-wheel-metadata/
 .venv/
-
-# macOS
-.DS_Store
