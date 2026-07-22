@@ -5,8 +5,9 @@ import voluptuous as vol
 from hikconnect.api import HikConnect
 from hikconnect.exceptions import LoginError
 from homeassistant import config_entries, core
+from homeassistant.core import callback
 
-from .const import DOMAIN
+from .const import DEFAULT_SCAN_INTERVAL_MINUTES, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,3 +70,31 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
 
         return self.async_show_form(step_id="user", data_schema=DATA_SCHEMA, errors=errors)
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Return the options flow handler."""
+        return OptionsFlowHandler()
+
+
+class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
+    """Handle Hik-Connect options (scan interval, etc.)."""
+
+    async def async_step_init(self, user_input=None):
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current_interval = self.config_entry.options.get(
+            "scan_interval_minutes", DEFAULT_SCAN_INTERVAL_MINUTES
+        )
+        options_schema = vol.Schema(
+            {
+                vol.Required(
+                    "scan_interval_minutes", default=current_interval
+                ): vol.All(int, vol.Range(min=5, max=60)),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=options_schema)
+

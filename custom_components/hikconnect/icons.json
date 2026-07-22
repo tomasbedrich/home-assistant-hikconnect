@@ -1,0 +1,10 @@
+{
+  "services": {
+    "create_area": "mdi:plus-box-multiple",
+    "delete_area": "mdi:minus-box-multiple",
+    "update_area": "mdi:pencil-box-multiple",
+    "list_areas": "mdi:view-list",
+    "get_area_details": "mdi:information-box",
+    "list_cameras": "mdi:cctv"
+  }
+}

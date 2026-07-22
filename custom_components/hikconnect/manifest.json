@@ -17,7 +17,7 @@
 		"hikconnect"
 	],
 	"requirements": [
-		"hikconnect==2.0.1"
+		"hikconnect==2.1.0"
 	],
 	"version": "3.0.1"
 }

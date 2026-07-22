@@ -18,5 +18,16 @@
     "abort": {
       "already_configured": "Already configured for this username."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hik-Connect options",
+        "data": {
+          "scan_interval_minutes": "Scan interval (minutes)"
+        },
+        "description": "How often to poll the Hik-Connect cloud for device, camera, and area status updates (5–60 minutes)."
+      }
+    }
   }
 }
