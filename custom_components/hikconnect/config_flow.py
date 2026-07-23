@@ -7,7 +7,7 @@ from hikconnect.exceptions import LoginError
 from homeassistant import config_entries, core
 from homeassistant.core import callback
 
-from .const import DEFAULT_SCAN_INTERVAL_MINUTES, DOMAIN
+from .const import DEFAULT_CALL_STATUS_MODE, DEFAULT_SCAN_INTERVAL_MINUTES, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -89,11 +89,17 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         current_interval = self.config_entry.options.get(
             "scan_interval_minutes", DEFAULT_SCAN_INTERVAL_MINUTES
         )
+        current_mode = self.config_entry.options.get(
+            "call_status_mode", DEFAULT_CALL_STATUS_MODE
+        )
         options_schema = vol.Schema(
             {
                 vol.Required(
                     "scan_interval_minutes", default=current_interval
-                ): vol.All(int, vol.Range(min=5, max=60)),
+                ): vol.All(int, vol.Range(min=1, max=60)),
+                vol.Required(
+                    "call_status_mode", default=current_mode
+                ): vol.In(["callstate", "isapi"]),
             }
         )
         return self.async_show_form(step_id="init", data_schema=options_schema)

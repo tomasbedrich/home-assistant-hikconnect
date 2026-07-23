@@ -24,9 +24,10 @@
       "init": {
         "title": "Hik-Connect options",
         "data": {
-          "scan_interval_minutes": "Scan interval (minutes)"
+          "scan_interval_minutes": "Scan interval (minutes)",
+          "call_status_mode": "Call status mode"
         },
-        "description": "How often to poll the Hik-Connect cloud for device, camera, and area status updates (5–60 minutes)."
+        "description": "How often to poll the Hik-Connect cloud for device, camera, and area status updates (1–60 minutes)."
       }
     }
   }

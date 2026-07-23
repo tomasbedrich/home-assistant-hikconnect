@@ -18,7 +18,8 @@ from homeassistant.helpers.update_coordinator import (
     CoordinatorEntity,
     DataUpdateCoordinator,
 )
-from .const import DOMAIN
+from .const import DEFAULT_CALL_STATUS_MODE, CALL_STATUS_MODE_ISAPI, DOMAIN
+from .isapi import isapi_call_status
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,11 +47,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     data = hass.data[DOMAIN]
     api, coordinator = data["api"], data["coordinator"]
 
-    _patch_hikconnect_logger()
+    call_status_mode = entry.options.get("call_status_mode", DEFAULT_CALL_STATUS_MODE)
+
+    if call_status_mode != CALL_STATUS_MODE_ISAPI:
+        _patch_hikconnect_logger()
 
     new_entities = []
     for device_info in coordinator.data:
-        new_entities.append(CallStatusSensor(api, device_info))
+        if call_status_mode == CALL_STATUS_MODE_ISAPI:
+            new_entities.append(IsapiCallStatusSensor(api, device_info))
+        else:
+            new_entities.append(CallStatusSensor(api, device_info))
         new_entities.append(LocalIpSensor(coordinator, device_info["id"]))
         new_entities.append(WanIpSensor(coordinator, device_info["id"]))
         new_entities.append(WifiSignalSensor(coordinator, device_info["id"]))
@@ -59,32 +66,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         async_add_entities(new_entities, update_before_add=True)
 
 
-class CallStatusSensor(SensorEntity):
-    """
-    Represents a call status of an indoor station.
-    """
+class _CallStatusSensorBase(SensorEntity):
+    """Shared identity and icon for call status sensors."""
 
     def __init__(self, api: HikConnect, device_info: dict):
         super().__init__()
         self._api = api
         self._device_info = device_info
         self._attr_available = False
-
-    async def async_update(self) -> None:
-        get_call_status_coro = self._api.get_call_status(self._device_info["serial"])
-        try:
-            res = await asyncio.wait_for(get_call_status_coro, SCAN_INTERVAL_TIMEOUT.seconds)
-            self._attr_native_value = res["status"]
-            self._attr_extra_state_attributes = res["info"]
-            self._attr_available = True
-        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError, json.decoder.JSONDecodeError):
-            if RAISE_ON_ERRORS:
-                _LOGGER.exception("Update of call status failed")
-                raise
-            else:
-                # don't raise by default because hikconnect API errors are
-                # so frequent, that they can spam logs A LOT
-                self._attr_available = False
 
     @property
     def name(self):
@@ -112,6 +101,43 @@ class CallStatusSensor(SensorEntity):
             return "mdi:phone-in-talk"
         else:
             return "mdi:phone-alert"
+
+
+class CallStatusSensor(_CallStatusSensorBase):
+    """
+    Represents a call status of an indoor station.
+    """
+
+    async def async_update(self) -> None:
+        get_call_status_coro = self._api.get_call_status(self._device_info["serial"])
+        try:
+            res = await asyncio.wait_for(get_call_status_coro, SCAN_INTERVAL_TIMEOUT.seconds)
+            self._attr_native_value = res["status"]
+            self._attr_extra_state_attributes = res["info"]
+            self._attr_available = True
+        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError, json.decoder.JSONDecodeError):
+            if RAISE_ON_ERRORS:
+                _LOGGER.exception("Update of call status failed")
+                raise
+            else:
+                # don't raise by default because hikconnect API errors are
+                # so frequent, that they can spam logs A LOT
+                self._attr_available = False
+
+
+class IsapiCallStatusSensor(_CallStatusSensorBase):
+    """Call status via ISAPI cloud tunnel — works for outdoor stations (DS-KD series)."""
+
+    async def async_update(self) -> None:
+        try:
+            status = await asyncio.wait_for(
+                isapi_call_status(self._api, self._device_info["serial"]),
+                SCAN_INTERVAL_TIMEOUT.seconds,
+            )
+            self._attr_native_value = status
+            self._attr_available = True
+        except Exception:
+            self._attr_available = False
 
 
 class _DeviceFieldSensor(CoordinatorEntity, SensorEntity):
