@@ -149,9 +149,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         dr, entry.entry_id
     ):
         if not any(ident in expected_identifiers for ident in ha_device.identifiers):
-            dr.async_update_device(
-                ha_device.id, remove_config_entry_id=entry.entry_id
-            )
+            dr.async_remove_device(ha_device.id)
 
     # TODO handle multiple instances of the same integration
     hass.data[DOMAIN] = {
