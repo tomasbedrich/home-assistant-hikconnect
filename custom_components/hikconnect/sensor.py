@@ -5,6 +5,7 @@ from datetime import timedelta
 
 import aiohttp
 from hikconnect.api import HikConnect
+from hikconnect.exceptions import DeviceOffline
 from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
@@ -56,7 +57,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         new_entities.append(WifiSignalSensor(coordinator, device_info["id"]))
 
     if new_entities:
-        async_add_entities(new_entities, update_before_add=True)
+        # Avoid failing entity creation when the first poll raises DeviceOffline / API errors
+        async_add_entities(new_entities, update_before_add=False)
 
 
 class CallStatusSensor(SensorEntity):
@@ -71,13 +73,81 @@ class CallStatusSensor(SensorEntity):
         self._attr_available = False
 
     async def async_update(self) -> None:
-        get_call_status_coro = self._api.get_call_status(self._device_info["serial"])
+        """
+        Poll call status from Hik-Connect cloud.
+
+        The library method ``HikConnect.get_call_status()`` sends ``sessionId`` only
+        as an HTTP header. For ``/v3/devconfig/v1/call/{serial}/status`` that often
+        returns meta.code 2003/2009 ("device offline" / network error) even when the
+        device is online. The same endpoint works when ``sessionId`` is passed as a
+        query parameter (verified with Postman and HA REST sensor).
+
+        We therefore call the endpoint directly with query params, then apply the
+        same status/info mapping the library would have returned.
+        """
+        serial = self._device_info["serial"]
         try:
-            res = await asyncio.wait_for(get_call_status_coro, SCAN_INTERVAL_TIMEOUT.seconds)
-            self._attr_native_value = res["status"]
-            self._attr_extra_state_attributes = res["info"]
+            session_id = self._api.client.headers.get("sessionId")
+            if not session_id:
+                self._attr_available = False
+                return
+
+            base_url = getattr(self._api, "BASE_URL", "https://api.hik-connect.com")
+            url = (
+                f"{base_url}/v3/devconfig/v1/call/{serial}/status"
+                f"?sessionId={session_id}"
+                f"&clientType=55"
+                f"&lang=en-US"
+                f"&featureCode=deadbeef"
+            )
+
+            timeout = aiohttp.ClientTimeout(
+                total=SCAN_INTERVAL_TIMEOUT.total_seconds()
+            )
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as res:
+                    res_json = await res.json(content_type=None)
+
+            if (res_json.get("meta") or {}).get("code") != 200:
+                self._attr_available = False
+                return
+
+            data = json.loads(res_json["data"])
+
+            # Same mapping as hikconnect.api.HikConnect.CALL_STATUS_MAPPING
+            mapping = {
+                1: "idle",
+                2: "ringing",
+                3: "call in progress",
+            }
+            self._attr_native_value = mapping.get(data.get("callStatus"), "unknown")
+
+            # Same mapping as hikconnect.api.HikConnect.CALL_INFO_MAPPING
+            info = {}
+            caller = data.get("callerInfo") or {}
+            for in_key, out_key in (
+                    ("buildingNo", "building_number"),
+                    ("floorNo", "floor_number"),
+                    ("zoneNo", "zone_number"),
+                    ("unitNo", "unit_number"),
+                    ("devNo", "device_number"),
+                    ("devType", "device_type"),
+                    ("lockNum", "lock_number"),
+            ):
+                if in_key in caller:
+                    info[out_key] = caller[in_key]
+            self._attr_extra_state_attributes = info
             self._attr_available = True
-        except (asyncio.TimeoutError, aiohttp.ClientError, KeyError, json.decoder.JSONDecodeError):
+
+        except (
+                asyncio.TimeoutError,
+                aiohttp.ClientError,
+                KeyError,
+                json.decoder.JSONDecodeError,
+                TypeError,
+                ValueError,
+                DeviceOffline,
+        ):
             if RAISE_ON_ERRORS:
                 _LOGGER.exception("Update of call status failed")
                 raise
@@ -85,7 +155,6 @@ class CallStatusSensor(SensorEntity):
                 # don't raise by default because hikconnect API errors are
                 # so frequent, that they can spam logs A LOT
                 self._attr_available = False
-
     @property
     def name(self):
         return f"{self._device_info['name']} call status"  # TODO translate?
