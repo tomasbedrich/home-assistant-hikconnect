@@ -4,6 +4,7 @@ from hikconnect.api import HikConnect
 from homeassistant.components.lock import LockEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import (
@@ -83,11 +84,18 @@ class Lock(CoordinatorEntity, LockEntity):
         self.async_write_ha_state()
 
     async def async_unlock(self, **kwargs):
-        await self._api.unlock(
-            self._device_info["serial"],
-            self._camera_info["channel_number"],
-            self._lock_index,
-        )
+        try:
+            await self._api.unlock(
+                self._device_info["serial"],
+                self._camera_info["channel_number"],
+                self._lock_index,
+            )
+        except Exception as exc:
+            # The device (or Hik-Connect's cloud relay to it) can reject an unlock
+            # command while still assuming everything is fine below - don't report a
+            # successful unlock, and don't start the fake "door latch" countdown, unless
+            # the API call actually confirmed the command was accepted by the device.
+            raise HomeAssistantError(f"Failed to unlock {self.name}: {exc}") from exc
 
         async def _lock_later(_now):
             await self.async_lock()
