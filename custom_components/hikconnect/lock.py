@@ -137,7 +137,6 @@ class Lock(CoordinatorEntity, LockEntity):
             "identifiers": {
                 (DOMAIN, self._device_info["id"] + "-" + self._camera_info["id"])
             },
-            "via_device": (DOMAIN, self._device_info["id"]),
         }
 
     @property
