@@ -120,7 +120,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     for device in coordinator.data:
         ha_device_id = (DOMAIN, device["id"])
         expected_identifiers.add(ha_device_id)
-        dr.async_get_or_create(
+        ha_device = dr.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={ha_device_id},
             name=device["name"],
@@ -136,13 +136,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 continue
             ha_camera_id = (DOMAIN, device["id"] + "-" + camera["id"])
             expected_identifiers.add(ha_camera_id)
-            dr.async_get_or_create(
+            ha_camera = dr.async_get_or_create(
                 config_entry_id=entry.entry_id,
                 identifiers={ha_camera_id},
                 name=camera["name"],
                 manufacturer=MANUFACTURER,
-                via_device=ha_device_id,
             )
+            dr.async_update_device(ha_camera.id, via_device_id=ha_device.id)
 
     # Drop orphan devices created by previous versions.
     for ha_device in device_registry.async_entries_for_config_entry(
