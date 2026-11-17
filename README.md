@@ -12,6 +12,7 @@ A Home Assistant integration to communicate with Hikvision smart doorbells and N
 - Unlock a lock connected to Hikvision outdoor station.
 - Report call status of an indoor station (idle, ringing, call in progress) + call source (number of building, floor, etc.).
 - Arm, arm-silently, or disarm NVR alarm areas (camera groups) via `alarm_control_panel` entities.
+- Still image of each camera channel via `camera` entities (no live video).
 
 Nothing more yet, sorry. :) Visit an [issue tracker] to discuss planned features.
 
@@ -135,6 +136,12 @@ The poll interval can be changed without restarting Home Assistant:
 2. Find _Hik-Connect_ and click **Configure**.
 3. Set the **Scan interval (minutes)** (default: 30, range: 5–1440).
 4. Save — the integration reloads automatically.
+
+### Camera snapshots
+
+Each visible camera channel gets a `camera` entity showing a still image. The image is captured by the device on request through the Hik-Connect cloud, so it takes a few seconds and is refreshed at most once per minute. There is no live video.
+
+If the device has **Image and Video Encryption** enabled, set the **Device verification code** (printed on the device label) in the integration options (**Settings → Devices & Services → Hik-Connect → Configure**). One code is used for all devices of the account.
 
 ### Limitations
 

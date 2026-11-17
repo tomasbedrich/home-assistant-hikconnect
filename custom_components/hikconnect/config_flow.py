@@ -94,6 +94,12 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 vol.Required(
                     "scan_interval_minutes", default=current_interval
                 ): vol.All(int, vol.Range(min=5, max=60)),
+                vol.Optional(
+                    "verification_code",
+                    description={
+                        "suggested_value": self.config_entry.options.get("verification_code")
+                    },
+                ): str,
             }
         )
         return self.async_show_form(step_id="init", data_schema=options_schema)

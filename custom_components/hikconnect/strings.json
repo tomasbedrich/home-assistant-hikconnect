@@ -24,9 +24,13 @@
       "init": {
         "title": "Hik-Connect options",
         "data": {
-          "scan_interval_minutes": "Scan interval (minutes)"
+          "scan_interval_minutes": "Scan interval (minutes)",
+          "verification_code": "Device verification code"
         },
-        "description": "How often to poll the Hik-Connect cloud for device, camera, and area status updates (5–60 minutes)."
+        "description": "How often to poll the Hik-Connect cloud for device, camera, and area status updates (5–60 minutes).",
+        "data_description": {
+          "verification_code": "Needed only for devices with \"Image and Video Encryption\" enabled. It is printed on the device label (usually 6 upper-case letters)."
+        }
       }
     }
   }
