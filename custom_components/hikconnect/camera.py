@@ -43,6 +43,7 @@ async def async_setup_entry(
         for device_info in coordinator.data
         for camera_info in device_info["cameras"]
         if camera_info["is_shown"]
+        and device_info["locks"].get(camera_info["channel_number"], 0)
     ]
     data["cameras"] = {camera.stream_path: camera for camera in new_entities}
     if not hass.data.get(f"{DOMAIN}_stream_view"):
