@@ -282,6 +282,9 @@ def describe_rsp(rsp, code_md5=None):
 # --------------------------------------------------------------------------- ECDH (optional)
 
 
+_CLIENT_KEY = None
+
+
 def ecdh_session(peer_pub_der, key_ver):
     """Client side of the EZVIZ ECDH envelope (reverse-engineered, see issue #6)."""
     import zlib
@@ -290,7 +293,11 @@ def ecdh_session(peer_pub_der, key_ver):
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-    priv = ec.generate_private_key(ec.SECP256R1())
+    # one key pair for all connections, like the app: the device wraps the stream key for the
+    # public key from the VTM request
+    global _CLIENT_KEY  # pylint: disable=global-statement
+    _CLIENT_KEY = _CLIENT_KEY or ec.generate_private_key(ec.SECP256R1())
+    priv = _CLIENT_KEY
     self_pub = priv.public_key().public_bytes(
         serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
     )
