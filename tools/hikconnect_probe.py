@@ -7,6 +7,7 @@ https://github.com/tomasbedrich/home-assistant-hikconnect (see issue #6).
 
 Usage:  python3 hikconnect_probe.py
 Needs Python 3.9+, no extra packages. Optional: `pip install cryptography` enables one more test.
+Set HC_SKIP_PLAIN=1 to skip the unencrypted live stream attempt (needs `cryptography`).
 
 The script logs into Hik-Connect with your account (the same way the Home Assistant integration
 does), asks your devices for a snapshot and tries to open a live video stream for a few seconds.
@@ -263,8 +264,12 @@ def describe_rsp(rsp, code_md5=None):
     for f in sorted(rsp):
         v = rsp[f][0]
         name = names.get(f, f"#{f}")
-        if f in (1, 2):
+        if f == 1:
             parts.append(f"{name}={v}")
+        elif f == 2:
+            parts.append(f"{name}={'set' if v else 0}")
+        elif f == 3:
+            parts.append(f"{name}({len(v)}B, starts {v[:12].hex(' ')})")
         elif f == 9 and code_md5:
             parts.append(f"{name}(matches md5(md5(code))={v.decode(errors='replace') in code_md5})")
         else:
@@ -409,23 +414,75 @@ def decrypt_es(es, hevc, key, enc_type):
     return bytes(res)
 
 
-def analyze_stream(data, tag, code):
-    if not data:
+def rtp_payloads(packets):
+    """Return (payload types, payloads) of RTP packets."""
+    pts, res = set(), []
+    for pkt in packets:
+        if len(pkt) < 12 or pkt[0] >> 6 != 2:
+            continue
+        hl = 12 + 4 * (pkt[0] & 0x0F)
+        if pkt[0] & 0x10 and len(pkt) >= hl + 4:
+            hl += 4 + 4 * struct.unpack(">H", pkt[hl + 2 : hl + 4])[0]
+        end = len(pkt) - (pkt[-1] if pkt[0] & 0x20 else 0)
+        if end > hl:
+            pts.add(pkt[1] & 0x7F)
+            res.append(pkt[hl:end])
+    return pts, res
+
+
+def depay(payloads, hevc):
+    """RFC 6184 (H.264) / RFC 7798 (H.265) depayloading to an Annex-B stream."""
+    es, sc = bytearray(), b"\x00\x00\x00\x01"
+    hl = 2 if hevc else 1
+    for pl in payloads:
+        if len(pl) < hl + 1:
+            continue
+        t = (pl[0] >> 1) & 0x3F if hevc else pl[0] & 0x1F
+        if t == (48 if hevc else 24):  # aggregation packet
+            off = hl
+            while off + 2 <= len(pl):
+                (n,) = struct.unpack(">H", pl[off : off + 2])
+                es += sc + pl[off + 2 : off + 2 + n]
+                off += 2 + n
+        elif t == (49 if hevc else 28):  # fragmentation unit
+            fu = pl[hl]
+            if fu & 0x80:
+                hdr = bytes([(pl[0] & 0x81) | (fu & 0x3F) << 1, pl[1]]) if hevc else bytes([(pl[0] & 0xE0) | (fu & 0x1F)])
+                es += sc + hdr
+            es += pl[hl + 1 :]
+        else:
+            es += sc + pl
+    return bytes(es)
+
+
+def analyze_stream(packets, tag, code):
+    if not packets:
         return
-    if data[:4] == b"\x00\x00\x01\xba":
+    data = b"".join(packets)
+    pts, payloads = rtp_payloads(packets)
+    hevc = None
+    if payloads and len(payloads) > 0.9 * len(packets):
+        if payloads[0][:4] == b"\x00\x00\x01\xba":
+            container, data = "RTP + MPEG-PS", b"".join(payloads)
+        else:
+            sample = payloads[:200]
+            hevc = sum(p[1:2] == b"\x01" and not p[0] & 0x81 for p in sample) > 0.9 * len(sample)
+            container = f"RTP ({'H.265' if hevc else 'H.264'} payload)"
+    elif data[:4] == b"\x00\x00\x01\xba":
         container = "MPEG-PS"
-    elif data[0] >> 6 == 2:
-        container = "RTP?"
     else:
         container = "unknown"
-    out(f"  stream container: {container}, first bytes: {data[:8].hex(' ')}")
-    if container != "MPEG-PS":
+    out(f"  stream container: {container}, RTP payload types: {sorted(pts)}, first bytes: {packets[0][:8].hex(' ')}")
+    if hevc is not None:
+        es = depay(payloads, hevc)
+    elif "MPEG-PS" in container:
+        packs, types, descs, es = demux_ps(data)
+        hevc = 0x24 in types
+        codec = {0x1B: "H.264", 0x24: "H.265"}
+        out(f"  PS packs: {packs}, stream types: {[hex(t) + '=' + codec.get(t, '?') for t in sorted(types)]}")
+        out(f"  encryption descriptors (tag 0x80): {sorted(descs) or 'none'}")
+    else:
         return
-    packs, types, descs, es = demux_ps(data)
-    hevc = 0x24 in types
-    codec = {0x1B: "H.264", 0x24: "H.265"}
-    out(f"  PS packs: {packs}, stream types: {[hex(t) + '=' + codec.get(t, '?') for t in sorted(types)]}")
-    out(f"  encryption descriptors (tag 0x80): {sorted(descs) or 'none'}")
     total, valid, top = nal_stats(es, hevc)
     out(f"  video NAL units: {total}, valid headers: {valid} ({100 * valid // max(total, 1)}%), types: {top}")
     ext = "h265" if hevc else "h264"
@@ -485,7 +542,7 @@ def vtm_vtdu(vtm, url, tag, code, ecdh=None):
         out(f"  [{tag}] VTM reply channel={channel:#x} code={code_:#x}, cannot decode ({exc}), {len(body)} B")
         return False
     out(f"  [{tag}] VTM reply channel={channel:#x} code={code_:#x}: {describe_rsp(rsp, code_md5)}")
-    if rsp.get(1, [0])[0] != 0 or 7 not in rsp:
+    if rsp.get(1, [0])[0] not in (0, 5302) or 7 not in rsp:
         return False
 
     vtdu_url = rsp[7][0].decode()
@@ -499,7 +556,7 @@ def vtm_vtdu(vtm, url, tag, code, ecdh=None):
             return False
         keepalive = pb_str(1, rsp2.get(4, [b""])[0])
         send(s, keepalive, 0x132)
-        stats, data, start, last_ka = {}, bytearray(), time.time(), time.time()
+        stats, packets, start, last_ka = {}, [], time.time(), time.time()
         s.settimeout(5)
         try:
             while time.time() - start < STREAM_SECONDS:
@@ -507,15 +564,15 @@ def vtm_vtdu(vtm, url, tag, code, ecdh=None):
                 key = f"ch{channel:#x}/code{code_:#x}"
                 stats[key] = stats.get(key, 0) + 1
                 if channel in (0x01, 0x0B, 0x0C):
-                    data += body
+                    packets.append(body)
                 if time.time() - last_ka > 3:
                     send(s, keepalive, 0x132)
                     last_ka = time.time()
         except (socket.timeout, ConnectionError, ValueError) as exc:
             out(f"  [{tag}] stream ended early: {exc!r}")
-    out(f"  [{tag}] received {len(data)} B in {time.time() - start:.1f} s, frames: {stats}")
-    analyze_stream(bytes(data), tag, code)
-    return len(data) > 0
+    out(f"  [{tag}] received {sum(map(len, packets))} B in {time.time() - start:.1f} s, frames: {stats}")
+    analyze_stream(packets, tag, code)
+    return bool(packets)
 
 
 def main():
@@ -561,13 +618,25 @@ def main():
             f"tts_publicKey={'v%s/%dB' % (pk.get('version'), len(pk.get('key', ''))) if pk else 'no'}")
 
     cams = [c for c in pl.get("cameraInfos") or [] if c.get("deviceSerial") in anon]
+    for sn in anon:
+        if any(c["deviceSerial"] == sn for c in cams):
+            continue
+        try:
+            ci = http("GET", f"{API}/v3/userdevices/v1/cameras/info", headers=headers,
+                      params={"deviceSerial": sn, "channelNo": 1}).get("cameraInfos") or []
+            out(f"cameras/info fallback for {anon[sn]}: {len(ci)} channels")
+            cams += ci
+        except Exception as exc:  # pylint: disable=broad-except
+            out(f"cameras/info fallback for {anon[sn]} failed: {exc!r}")
     for c in cams:
         secrets.append(c.get("cameraName", ""))
     out(f"cameraInfos: {len(cams)}, fields: {sorted(cams[0]) if cams else []}")
     for c in cams:
         biz = c.get("streamBizUrl")
-        out(f"  {anon[c['deviceSerial']]} ch{c.get('channelNo')}: shown={c.get('isShow')} "
-            f"streamBizUrl params={param_names(biz) if biz else None}")
+        if c.get("isShow") or len(cams) <= 8:
+            out(f"  {anon[c['deviceSerial']]} ch{c.get('channelNo')}: shown={c.get('isShow')} "
+                f"signal={(c.get('deviceChannelInfo') or {}).get('signalStatus')} "
+                f"streamBizUrl params={param_names(biz) if biz else None}")
 
     try:
         tk = http("POST", f"{API}/api/user/token/get", {"featureCode": "deadbeef", "count": 6}, headers=headers)
@@ -578,7 +647,9 @@ def main():
         tokens = []
         out(f"stream tokens: failed {exc!r}")
 
-    targets = [c for c in cams if c.get("isShow")][:MAX_CHANNELS] or cams[:MAX_CHANNELS]
+    shown = [c for c in cams if c.get("isShow")] or cams
+    active = [c for c in shown if (c.get("deviceChannelInfo") or {}).get("signalStatus") == 1]
+    targets = (active or shown)[:MAX_CHANNELS]
     for c in targets:
         sn, ch = c["deviceSerial"], c["channelNo"]
         tag = f"{anon[sn]}_ch{ch}"
@@ -613,7 +684,7 @@ def main():
             continue
         out(f"--- {tag} live: VTM {vtm.get('domain')}:{vtm.get('port')} ---")
         biz = c.get("streamBizUrl") or ""
-        attempts = [("plain", None)]
+        attempts = [] if os.environ.get("HC_SKIP_PLAIN") else [("plain", None)]
         pk = (ttss.get(sn) or {}).get("publicKey") or {}
         if pk.get("key"):
             try:
