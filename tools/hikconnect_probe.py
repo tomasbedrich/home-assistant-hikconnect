@@ -317,7 +317,8 @@ def ecdh_session(peer_pub_der, key_ver):
         ct = chacha(st["session"], st["seq"], data)
         return head + ct + mac(st["session"], head, ct)
 
-    def dec(pkg):
+    def dec(pkg, st=st):
+        """st: the message channel state by default; the stream channel has its own one."""
         typ, ext = pkg[1], pkg[2]
         (length,) = struct.unpack(">H", pkg[ext + 3 : ext + 5])
         (seq,) = struct.unpack(">I", pkg[ext + 7 : ext + 11])
@@ -546,7 +547,7 @@ def vtm_vtdu(vtm, url, tag, code, ecdh=None):
         return False
 
     vtdu_url = rsp[7][0].decode()
-    out(f"  [{tag}] VTDU {ysproto_host(vtdu_url)[0]}:{ysproto_host(vtdu_url)[1]}, url params: {param_names(vtdu_url)}")
+    out(f"  [{tag}] VTDU port {ysproto_host(vtdu_url)[1]}, url params: {param_names(vtdu_url)}")
     with connect(ysproto_host(vtdu_url)) as s:
         send(s, stream_info_req(url, rsp.get(5, [b""])[0]))
         channel, code_, body = receive(s)
@@ -557,13 +558,24 @@ def vtm_vtdu(vtm, url, tag, code, ecdh=None):
         keepalive = pb_str(1, rsp2.get(4, [b""])[0])
         send(s, keepalive, 0x132)
         stats, packets, start, last_ka = {}, [], time.time(), time.time()
+        stream_state = {"session": b"\0" * 32}
         s.settimeout(5)
         try:
             while time.time() - start < STREAM_SECONDS:
                 channel, code_, body = recv_frame(s)
                 key = f"ch{channel:#x}/code{code_:#x}"
                 stats[key] = stats.get(key, 0) + 1
-                if channel in (0x01, 0x0B, 0x0C):
+                if channel in (0x0B, 0x0C) and crypto:
+                    head, pkg = (b"", body) if channel == 0x0B else (body[:12], body[12:])
+                    try:
+                        typ, mac_ok, body = crypto["dec"](pkg, stream_state)
+                        key = f"ecdh type{typ} mac_ok={mac_ok}"
+                    except Exception as exc:  # pylint: disable=broad-except
+                        body, key = b"", f"ecdh error {type(exc).__name__}"
+                    stats[key] = stats.get(key, 0) + 1
+                    if head and body:
+                        body = bytes([head[0] & 0xDF]) + head[1:] + body
+                if channel in (0x01, 0x0B, 0x0C) and body:
                     packets.append(body)
                 if time.time() - last_ka > 3:
                     send(s, keepalive, 0x132)
