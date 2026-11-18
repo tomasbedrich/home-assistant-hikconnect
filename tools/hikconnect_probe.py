@@ -8,6 +8,7 @@ https://github.com/tomasbedrich/home-assistant-hikconnect (see issue #6).
 Usage:  python3 hikconnect_probe.py
 Needs Python 3.9+, no extra packages. Optional: `pip install cryptography` enables one more test.
 Set HC_SKIP_PLAIN=1 to skip the unencrypted live stream attempt (needs `cryptography`).
+Set HC_STREAM_SECONDS=600 to test how long the stream stays open (default 10).
 
 The script logs into Hik-Connect with your account (the same way the Home Assistant integration
 does), asks your devices for a snapshot and tries to open a live video stream for a few seconds.
@@ -32,7 +33,8 @@ import urllib.request
 API = "https://api.hik-connect.com"
 HEADERS = {"clientType": "55", "lang": "en-US", "featureCode": "deadbeef"}
 CLIENT_VERSION = "v3.10.1.20260710"
-STREAM_SECONDS = 10
+STREAM_SECONDS = int(os.environ.get("HC_STREAM_SECONDS") or 10)
+MAX_PACKETS = 20000  # ~30 s of video kept for analysis, longer runs only count bytes
 MAX_CHANNELS = 3
 JPEG_MAGIC = b"\xff\xd8"
 
@@ -557,7 +559,7 @@ def vtm_vtdu(vtm, url, tag, code, ecdh=None):
             return False
         keepalive = pb_str(1, rsp2.get(4, [b""])[0])
         send(s, keepalive, 0x132)
-        stats, packets, start, last_ka = {}, [], time.time(), time.time()
+        stats, packets, total, start, last_ka = {}, [], 0, time.time(), time.time()
         stream_state = {"session": b"\0" * 32}
         s.settimeout(5)
         try:
@@ -576,13 +578,15 @@ def vtm_vtdu(vtm, url, tag, code, ecdh=None):
                     if head and body:
                         body = bytes([head[0] & 0xDF]) + head[1:] + body
                 if channel in (0x01, 0x0B, 0x0C) and body:
-                    packets.append(body)
+                    total += len(body)
+                    if len(packets) < MAX_PACKETS:
+                        packets.append(body)
                 if time.time() - last_ka > 3:
                     send(s, keepalive, 0x132)
                     last_ka = time.time()
         except (socket.timeout, ConnectionError, ValueError) as exc:
             out(f"  [{tag}] stream ended early: {exc!r}")
-    out(f"  [{tag}] received {sum(map(len, packets))} B in {time.time() - start:.1f} s, frames: {stats}")
+    out(f"  [{tag}] received {total} B in {time.time() - start:.1f} s, frames: {stats}")
     analyze_stream(packets, tag, code)
     return bool(packets)
 
