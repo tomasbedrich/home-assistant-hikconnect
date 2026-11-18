@@ -182,6 +182,12 @@ Install by searching for _Hik-Connect_ integration in [HACS].
 3. Restart Home Assistant.
 
 
+## Reporting problems
+Please attach a debug log: Settings -> Devices & services -> Hik-Connect -> Enable debug logging,
+reproduce the problem (e.g. open the live view for a minute), then disable debug logging and the log
+file is downloaded. It contains no passwords or stream tokens, but please check it before posting.
+
+
 ## Links
 - [`hikconnect` Python library]
 - [forum thread about this integration]

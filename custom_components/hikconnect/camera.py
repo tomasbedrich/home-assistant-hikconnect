@@ -71,7 +71,11 @@ class HikConnectStreamView(HomeAssistantView):
         camera = cameras.get(f"{entry_id}/{serial}/{channel}")
         token = request.query.get("auth", "").encode()
         if camera is None or not hmac.compare_digest(token, camera.token.encode()):
+            _LOGGER.debug("Refused stream request for %s/%s/%s", entry_id, serial, channel)
             return web.Response(status=HTTPStatus.UNAUTHORIZED)
+        _LOGGER.debug(
+            "Stream client %s connected to %s", request.remote, camera.entity_id
+        )
 
         response = web.StreamResponse(headers={"Content-Type": "video/mp2t"})
         await response.prepare(request)
@@ -80,6 +84,9 @@ class HikConnectStreamView(HomeAssistantView):
             async with contextlib.aclosing(camera.frames()) as frames:
                 async for frame in frames:
                     await response.write(muxer.mux(frame))
+        _LOGGER.debug(
+            "Stream client %s disconnected from %s", request.remote, camera.entity_id
+        )
         return response
 
 
@@ -173,6 +180,7 @@ class HikConnectCamera(Camera):
 
     async def _produce(self) -> None:
         _LOGGER.debug("Starting live stream of %s", self.name)
+        count = 0
         try:
             async for frame in self._api.live_stream(
                 self._device_info["serial"],
@@ -180,9 +188,16 @@ class HikConnectCamera(Camera):
                 main_stream=True,
                 verification_code=self._verification_code,
             ):
+                count += 1
+                if count == 1:
+                    _LOGGER.debug(
+                        "First frame of %s: %s, keyframe %s", self.name, frame.codec, frame.keyframe
+                    )
                 self._send(frame)
         except (HikConnectError, aiohttp.ClientError) as exc:
             _LOGGER.warning("Live stream of %s failed: %s", self.name, exc)
+        finally:
+            _LOGGER.debug("Live stream of %s ended after %d frames", self.name, count)
         self._send(None)
 
     def _send(self, frame) -> None:
