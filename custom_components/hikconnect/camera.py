@@ -15,6 +15,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.network import get_url
 
@@ -45,6 +46,13 @@ async def async_setup_entry(
         if camera_info["is_shown"]
     ]
     data["cameras"] = {camera.stream_path: camera for camera in new_entities}
+    # drop cameras of channels skipped by the coordinator, registered by previous versions
+    registry = er.async_get(hass)
+    unique_ids = {camera.unique_id for camera in new_entities}
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity.domain == "camera" and entity.unique_id not in unique_ids:
+            _LOGGER.debug("Removing camera %s of a skipped channel", entity.entity_id)
+            registry.async_remove(entity.entity_id)
     if not hass.data.get(f"{DOMAIN}_stream_view"):
         hass.data[f"{DOMAIN}_stream_view"] = True
         hass.http.register_view(HikConnectStreamView(hass))

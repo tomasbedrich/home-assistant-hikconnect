@@ -23,6 +23,24 @@ _LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _is_real_channel(device_info: dict, camera_info: dict) -> bool:
+    """
+    Intercoms list ~50 channels, only the ones with locks are real (issues #54, #60). Devices
+    without locks (NVRs, cameras) keep all channels.
+    """
+    # ponytail: a lockless camera linked to an intercom is skipped too, use signal_status if
+    # someone needs it
+    locks = device_info["locks"]
+    if locks and not locks.get(camera_info["channel_number"], 0):
+        _LOGGER.debug(
+            "Skipping channel %s of %s, it has no locks",
+            camera_info["channel_number"],
+            device_info["name"],
+        )
+        return False
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     api = HikConnect()
     api.BASE_URL = entry.data["base_url"]
@@ -63,7 +81,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 devices.append(device)
             for device_info in devices:
                 _LOGGER.info("Getting cameras for device: '%s'", device_info["serial"])
-                cameras = [c async for c in api.get_cameras(device_info["serial"])]
+                cameras = [
+                    c
+                    async for c in api.get_cameras(device_info["serial"])
+                    if _is_real_channel(device_info, c)
+                ]
                 device_info.update({"cameras": cameras})
 
                 _LOGGER.info("Getting areas for device: '%s'", device_info["serial"])

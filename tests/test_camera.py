@@ -10,6 +10,7 @@ from hikconnect.exceptions import SnapshotError
 from homeassistant.components.camera import async_get_image
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
+from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -67,6 +68,8 @@ def _api():
     api.get_cameras = lambda serial: _agen([
         {"id": "cam1", "name": "Entrance", "channel_number": 1, "signal_status": 1, "is_shown": 1},
         {"id": "cam2", "name": "Hidden", "channel_number": 2, "signal_status": 1, "is_shown": 0},
+        # intercom channel without a lock, issue #54
+        {"id": "cam3", "name": "Phantom", "channel_number": 3, "signal_status": 0, "is_shown": 1},
     ])
     api.get_areas = lambda serial: _agen([])
     api.get_call_status = AsyncMock(return_value={"status": "idle", "info": {}})
@@ -92,6 +95,15 @@ async def _setup(hass, api):
 async def test_camera(hass: HomeAssistant):
     api = _api()
     entry = await _setup(hass, api)
+    # a camera of a skipped channel registered by a previous version is removed on reload
+    registry = er.async_get(hass)
+    stale = registry.async_get_or_create(
+        "camera", DOMAIN, "hikconnect-DS-KV-1-cam3-camera", config_entry=entry
+    )
+    with patch("custom_components.hikconnect.HikConnect", return_value=api):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+    assert registry.async_get(stale.entity_id) is None
 
     cameras = hass.states.async_entity_ids("camera")
     assert len(cameras) == 1
