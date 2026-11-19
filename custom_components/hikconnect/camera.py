@@ -26,6 +26,9 @@ from .tsmux import TsMuxer
 # does it at most once per 10 minutes. Don't let the frontend (refreshing every 10 s)
 # hammer the cloud.
 SNAPSHOT_MIN_INTERVAL = 60  # seconds
+# HA waits 10 s for a still image. Some devices answer the capture slowly or never
+# (DS-KD8003, issue #6), leave the rest of the time to the live stream fallback.
+SNAPSHOT_TIMEOUT = 5  # seconds
 # Frames buffered per stream client, a client lagging further behind is disconnected.
 STREAM_QUEUE_SIZE = 100
 
@@ -141,15 +144,18 @@ class HikConnectCamera(Camera):
                 return self._image
             self._image_time = time.monotonic()
             try:
-                self._image = await self._api.get_snapshot(
-                    self._device_info["serial"],
-                    self._camera_info["channel_number"],
-                    is_encrypted=bool(self._device_info.get("is_encrypted")),
-                    verification_code=self._verification_code,
-                )
-            except (HikConnectError, aiohttp.ClientError) as exc:
+                async with asyncio.timeout(SNAPSHOT_TIMEOUT):
+                    self._image = await self._api.get_snapshot(
+                        self._device_info["serial"],
+                        self._camera_info["channel_number"],
+                        is_encrypted=bool(self._device_info.get("is_encrypted")),
+                        verification_code=self._verification_code,
+                    )
+            except (HikConnectError, aiohttp.ClientError, TimeoutError) as exc:
                 _LOGGER.warning(
-                    "Failed to get snapshot of %s, using live stream: %s", self.name, exc
+                    "Failed to get snapshot of %s, using live stream: %s",
+                    self.name,
+                    str(exc) or f"no response in {SNAPSHOT_TIMEOUT} s",
                 )
                 try:
                     if stream := await self.async_create_stream():

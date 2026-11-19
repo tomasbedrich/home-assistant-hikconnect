@@ -145,11 +145,18 @@ async def test_stream_view(hass: HomeAssistant, hass_client_no_auth):
     assert camera._producer is None, "upstream must stop when the last client disconnects"
 
 
+async def _no_response(*args, **kwargs):
+    await asyncio.sleep(3600)
+
+
 @pytest.mark.parametrize("expected_lingering_timers", [True])  # HLS idle timer of HA stream
-async def test_snapshot_falls_back_to_stream(hass: HomeAssistant, hass_client_no_auth):
+@pytest.mark.parametrize("snapshot_error", [SnapshotError("meta 2009"), _no_response])
+async def test_snapshot_falls_back_to_stream(
+    hass: HomeAssistant, hass_client_no_auth, snapshot_error, caplog
+):
     """End to end: HA stream (PyAV) reads the view and decodes a JPEG."""
     api = _api()
-    api.get_snapshot.side_effect = SnapshotError("meta 2009")
+    api.get_snapshot.side_effect = snapshot_error
     assert await async_setup_component(hass, "stream", {})
     await _setup(hass, api)
     client = await hass_client_no_auth()
@@ -159,7 +166,9 @@ async def test_snapshot_falls_back_to_stream(hass: HomeAssistant, hass_client_no
     entity_id = hass.states.async_entity_ids("camera")[0]
     camera = next(iter(hass.data[DOMAIN]["cameras"].values()))
 
-    image = await async_get_image(hass, entity_id, timeout=30)
+    # within the time HA gives a still image, also when the capture never answers (issue #6)
+    image = await async_get_image(hass, entity_id)
+    assert "using live stream: " in caplog.text and "using live stream: \n" not in caplog.text
     assert image.content[:2] == b"\xff\xd8"
     assert image.content != JPEG
 
