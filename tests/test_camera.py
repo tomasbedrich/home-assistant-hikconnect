@@ -1,4 +1,5 @@
 import asyncio
+import io
 from collections import namedtuple
 from fractions import Fraction
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -167,9 +168,19 @@ async def test_snapshot_falls_back_to_stream(
     camera = next(iter(hass.data[DOMAIN]["cameras"].values()))
 
     # within the time HA gives a still image, also when the capture never answers (issue #6)
-    image = await async_get_image(hass, entity_id)
+    thumbnail = await async_get_image(hass, entity_id, width=80, height=60)
     assert "using live stream: " in caplog.text and "using live stream: \n" not in caplog.text
-    assert image.content[:2] == b"\xff\xd8"
+    assert _jpeg_width(thumbnail.content) == 80
+
+    # the thumbnail scaled for the frontend must not be served as the full image
+    image = await async_get_image(hass, entity_id)
     assert image.content != JPEG
+    assert _jpeg_width(image.content) == 320
+    assert api.get_snapshot.await_count == 1, "one capture for all sizes"
 
     await camera.stream.stop()
+
+
+def _jpeg_width(data):
+    with av.open(io.BytesIO(data)) as container:
+        return container.streams.video[0].codec_context.width

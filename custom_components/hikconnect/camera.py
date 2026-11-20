@@ -159,9 +159,9 @@ class HikConnectCamera(Camera):
                 )
                 try:
                     if stream := await self.async_create_stream():
+                        # full size, HA scales the cached image for each request
                         self._image = (
-                            await stream.async_get_image(width, height, wait_for_next_keyframe=True)
-                            or self._image
+                            await stream.async_get_image(wait_for_next_keyframe=True) or self._image
                         )
                 except HomeAssistantError as err:
                     _LOGGER.warning("Failed to get stream image of %s: %s", self.name, err)
