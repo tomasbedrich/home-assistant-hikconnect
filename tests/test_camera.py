@@ -64,7 +64,7 @@ def _api():
     api.get_devices = lambda: _agen([{
         "id": "DS-KV-1", "name": "Doorbell", "serial": "D1", "type": "DS-KV6113",
         "version": "V1", "locks": {1: 1}, "local_ip": None, "wan_ip": None,
-        "is_online": True, "wifi_signal": None, "update_available": False, "is_encrypted": True,
+        "is_online": True, "wifi_signal": None, "update_available": False, "is_encrypted": True, "talk": 1,
     }])
     api.get_cameras = lambda serial: _agen([
         {"id": "cam1", "name": "Entrance", "channel_number": 1, "signal_status": 1, "is_shown": 1},
@@ -118,32 +118,6 @@ async def test_camera(hass: HomeAssistant):
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert "verification_code" in [str(k) for k in result["data_schema"].schema]
-
-
-async def test_stream_view(hass: HomeAssistant, hass_client_no_auth):
-    api = _api()
-    await _setup(hass, api)
-    client = await hass_client_no_auth()
-    camera = next(iter(hass.data[DOMAIN]["cameras"].values()))
-    path = f"/api/hikconnect/stream/{camera.stream_path}"
-
-    assert (await client.get(path, params={"auth": "wrong"})).status == 401
-    assert (await client.get(path)).status == 401
-    assert (await client.get(path + "9", params={"auth": camera.token})).status == 401
-
-    res = await client.get(path, params={"auth": camera.token})
-    assert res.status == 200
-    assert res.headers["Content-Type"] == "video/mp2t"
-    data = await res.content.readexactly(188 * 10)
-    assert data[::188] == b"\x47" * 10
-    api.live_stream.assert_called_once_with("D1", 1, main_stream=True, verification_code="ABCDEF")
-
-    res.close()
-    for _ in range(50):
-        if camera._producer is None:
-            break
-        await asyncio.sleep(0.05)
-    assert camera._producer is None, "upstream must stop when the last client disconnects"
 
 
 async def _no_response(*args, **kwargs):

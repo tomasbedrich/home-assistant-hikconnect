@@ -53,7 +53,9 @@ Options are in **Settings → Devices & Services → Hik-Connect → Configure**
 
 Each visible camera channel gets a `camera` entity showing a still image. The image is captured by the device on request through the Hik-Connect cloud, so it takes a few seconds and is refreshed at most once per minute. Devices which cannot capture (some intercoms) get the image from the live video instead.
 
-**Live video** is relayed from the Hik-Connect cloud (same as in the mobile app) and played by Home Assistant's built-in `stream` integration (part of `default_config`), no add-on needed. The cloud stream only runs while somebody watches. The cloud cuts streams after about 30 minutes, the integration reconnects automatically. Home Assistant must be able to reach itself on its internal URL (**Settings → System → Network**).
+**Live video** is relayed from the Hik-Connect cloud (same as in the mobile app) and played by Home Assistant's built-in `stream` integration (part of `default_config`), no add-on needed. The cloud stream only runs while somebody watches. The cloud cuts streams after about 30 minutes, the integration reconnects automatically. The integration serves the video over RTSP on a random port of `127.0.0.1` to Home Assistant's built-in go2rtc and `stream` (RTSP is needed for two-way audio), so a go2rtc running elsewhere cannot use it.
+
+**Two-way audio** (experimental, Home Assistant 2026.11+): devices which support talking in the Hik-Connect app get the talk button on the live view. Enable **Settings → System → Labs → Two-way audio** and open Home Assistant over HTTPS (browsers allow the microphone only there). Your voice goes through the Hik-Connect cloud like in the app. Only devices taking G.711 audio work for now.
 
 ## Alarm areas
 

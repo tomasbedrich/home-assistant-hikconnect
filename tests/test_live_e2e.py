@@ -11,6 +11,7 @@ import socket
 import subprocess
 from fractions import Fraction
 from pathlib import Path
+from unittest.mock import patch
 
 import aiohttp
 import av
@@ -46,7 +47,7 @@ def _encode(codec):
         "h264": ("libx264", {"g": str(GOP), "bf": "0", "tune": "zerolatency", "crf": "10"}),
         "h265": (
             "libx265",
-            {"x265-params": f"keyint={GOP}:bframes=0:repeat-headers=1:log-level=none", "crf": "10"},
+            {"x265-params": f"keyint={GOP}:min-keyint={GOP}:scenecut=0:bframes=0:repeat-headers=1:log-level=none", "crf": "10"},
         ),
     }[codec]
     if name not in av.codecs_available:
@@ -198,8 +199,11 @@ log:
 @pytest.mark.enable_socket
 async def test_ha_stream_decodes(hass: HomeAssistant, hass_client_no_auth, codec):
     camera, source = await _camera(hass, hass_client_no_auth, codec)
-    decoded = await hass.async_add_executor_job(_decode, source)
-    _check(decoded)
+    # the options HA stream adds to rtsp:// sources (stream/__init__.py _convert_stream_options)
+    options = {"rtsp_flags": "prefer_tcp", "stimeout": "5000000"} if source.startswith("rtsp://") else {}
+    decoded = await hass.async_add_executor_job(_decode, source, options)
+    # ffmpeg's RTSP demuxer gives the first picture no pts, the same with go2rtc's RTSP output
+    _check(decoded, skipped=1 if options else 0)
     await _wait_producer_stopped(camera)
 
 
@@ -220,4 +224,18 @@ async def test_go2rtc_rotated_decodes(hass: HomeAssistant, hass_client_no_auth, 
     url = await go2rtc("cam", f"ffmpeg:{source}#video=h264#audio=copy#rotate=90")
     decoded = await hass.async_add_executor_job(_decode, url, {"rtsp_transport": "tcp"})
     _check(decoded, skipped=GOP)
+    await _wait_producer_stopped(camera)
+
+
+@pytest.mark.parametrize("codec", ["h264", "h265"])
+@pytest.mark.enable_socket
+async def test_fragmented_decodes(hass: HomeAssistant, hass_client_no_auth, go2rtc, codec):
+    """NAL units longer than an RTP packet go out as fragmentation units (FU-A / H.265 FU)."""
+    with patch("custom_components.hikconnect.rtsp.MAX_PAYLOAD", 50):
+        camera, source = await _camera(hass, hass_client_no_auth, codec)
+        options = {"rtsp_flags": "prefer_tcp", "stimeout": "5000000"}
+        _check(await hass.async_add_executor_job(_decode, source, options), skipped=1)
+        url = await go2rtc("cam", source)
+        decoded = await hass.async_add_executor_job(_decode, url, {"rtsp_transport": "tcp"})
+        _check(decoded, skipped=3)
     await _wait_producer_stopped(camera)
