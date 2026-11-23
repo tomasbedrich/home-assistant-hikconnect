@@ -1,26 +1,28 @@
 import asyncio
 import contextlib
-import hmac
 import logging
 import secrets
 import time
-from http import HTTPStatus
 
 import aiohttp
-from aiohttp import web
 from hikconnect.api import HikConnect
 from hikconnect.exceptions import HikConnectError
 from homeassistant.components.camera import Camera, CameraEntityFeature
-from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.network import get_url
 
+from . import g711
 from .const import DOMAIN
-from .tsmux import TsMuxer
+from .rtsp import RtspServer, parameter_sets
+
+try:
+    from homeassistant.components.camera import CameraEntityCapabilities
+except ImportError:  # HA < 2026.11, no two-way audio
+    CameraEntityCapabilities = None
 
 # Every snapshot makes the device capture and upload a new image, the official app
 # does it at most once per 10 minutes. Don't let the frontend (refreshing every 10 s)
@@ -31,6 +33,20 @@ SNAPSHOT_MIN_INTERVAL = 60  # seconds
 SNAPSHOT_TIMEOUT = 5  # seconds
 # Frames buffered per stream client, a client lagging further behind is disconnected.
 STREAM_QUEUE_SIZE = 100
+# go2rtc reconnects to add the microphone and retries a slow DESCRIBE right away, keep the cloud
+# stream running for it after the last client left
+STREAM_LINGER = 3  # seconds
+# the browser stops sending when the talk button is released
+TALK_IDLE_TIMEOUT = 3  # seconds
+# go2rtc sends 128 ms packets, more queued means the talk lags behind
+TALK_QUEUE_SIZE = 10
+# don't hammer the cloud with a new session for every packet when talking fails
+TALK_RETRY_DELAY = 5  # seconds
+TALK_SEND_TIMEOUT = 5  # seconds
+# the app sends 20 ms packets in real time, 160 bytes of G.711 at 8 kHz (talk.py of hikconnect)
+TALK_CHUNK, TALK_CHUNK_TIME = 160, 0.02
+# device codecs of hikconnect.talk.CODECS the browser G.711 can be converted to
+TALK_CODECS = {1: "PCMU", 2: "PCMA"}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,49 +72,31 @@ async def async_setup_entry(
         if entity.domain == "camera" and entity.unique_id not in unique_ids:
             _LOGGER.debug("Removing camera %s of a skipped channel", entity.entity_id)
             registry.async_remove(entity.entity_id)
-    if not hass.data.get(f"{DOMAIN}_stream_view"):
-        hass.data[f"{DOMAIN}_stream_view"] = True
-        hass.http.register_view(HikConnectStreamView(hass))
     if new_entities:
         async_add_entities(new_entities)
 
 
-class HikConnectStreamView(HomeAssistantView):
-    """Live video of a camera as MPEG-TS, the stream source of HA stream / go2rtc."""
+async def _rtsp_server(hass: HomeAssistant) -> RtspServer:
+    """The RTSP server of all cameras, started on the first use."""
+    if (server := hass.data.get(f"{DOMAIN}_rtsp")) is None:
+        server = hass.data[f"{DOMAIN}_rtsp"] = RtspServer(_Cameras(hass))
+        await server.start()
 
-    url = "/api/hikconnect/stream/{entry_id}/{serial}/{channel}"
-    name = "api:hikconnect:stream"
-    # HA stream (PyAV) and go2rtc open the URL without HA credentials, the per-camera
-    # token in the `auth` query parameter (redacted in HA stream logs) is checked instead.
-    requires_auth = False
+        async def stop(_event):
+            await server.stop()
+
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop)
+    return server
+
+
+class _Cameras:
+    """The cameras of the currently loaded config entry, looked up by the RTSP server."""
 
     def __init__(self, hass: HomeAssistant):
         self.hass = hass
 
-    async def get(
-        self, request: web.Request, entry_id: str, serial: str, channel: str
-    ) -> web.StreamResponse:
-        cameras = self.hass.data.get(DOMAIN, {}).get("cameras", {})
-        camera = cameras.get(f"{entry_id}/{serial}/{channel}")
-        token = request.query.get("auth", "").encode()
-        if camera is None or not hmac.compare_digest(token, camera.token.encode()):
-            _LOGGER.debug("Refused stream request for %s/%s/%s", entry_id, serial, channel)
-            return web.Response(status=HTTPStatus.UNAUTHORIZED)
-        _LOGGER.debug(
-            "Stream client %s connected to %s", request.remote, camera.entity_id
-        )
-
-        response = web.StreamResponse(headers={"Content-Type": "video/mp2t"})
-        await response.prepare(request)
-        muxer = TsMuxer()
-        with contextlib.suppress(ConnectionResetError):
-            async with contextlib.aclosing(camera.frames()) as frames:
-                async for frame in frames:
-                    await response.write(muxer.mux(frame))
-        _LOGGER.debug(
-            "Stream client %s disconnected from %s", request.remote, camera.entity_id
-        )
-        return response
+    def get(self, path):
+        return self.hass.data.get(DOMAIN, {}).get("cameras", {}).get(path)
 
 
 class HikConnectCamera(Camera):
@@ -124,7 +122,23 @@ class HikConnectCamera(Camera):
         self.stream_path = f"{entry_id}/{device_info['serial']}/{camera_info['channel_number']}"
         self._queues: set[asyncio.Queue] = set()
         self._producer: asyncio.Task | None = None
+        self.parameter_sets: dict[int, bytes] = {}
+        self._talk_queue: asyncio.Queue | None = None
+        self._talk_retry_at = 0.0
         self._attr_supported_features = CameraEntityFeature.STREAM
+        # support_talk 1 = full duplex; 3 = push to talk needs other commands, not implemented
+        self.supports_talk = device_info.get("talk") == 1
+        _LOGGER.debug(
+            "%s of %s (%s): support_talk %s",
+            camera_info["name"],
+            device_info["serial"],
+            device_info["type"],
+            device_info.get("talk"),
+        )
+        if CameraEntityCapabilities is not None:
+            self._attr_camera_entity_capabilities = CameraEntityCapabilities(
+                two_way_audio=self.supports_talk
+            )
         self._attr_name = camera_info["name"]
         self._attr_unique_id = "-".join(
             (DOMAIN, device_info["id"], camera_info["id"], "camera")
@@ -168,8 +182,9 @@ class HikConnectCamera(Camera):
             return self._image
 
     async def stream_source(self) -> str | None:
-        base_url = get_url(self.hass, allow_external=False)
-        return f"{base_url}/api/hikconnect/stream/{self.stream_path}?auth={self.token}"
+        # HA's go2rtc and stream run on the HA host
+        port = (await _rtsp_server(self.hass)).port
+        return f"rtsp://127.0.0.1:{port}/{self.stream_path}?auth={self.token}"
 
     async def frames(self):
         """Yield live frames, starting at a keyframe. All clients share one cloud stream."""
@@ -188,9 +203,16 @@ class HikConnectCamera(Camera):
         finally:
             self._queues.discard(queue)
             if not self._queues and self._producer:
-                _LOGGER.debug("Stopping live stream of %s, no clients left", self.name)
-                self._producer.cancel()
-                self._producer = None
+                self.hass.async_create_background_task(
+                    self._stop_producer(), f"hikconnect stop live stream {self.entity_id}"
+                )
+
+    async def _stop_producer(self) -> None:
+        await asyncio.sleep(STREAM_LINGER)
+        if not self._queues and self._producer:
+            _LOGGER.debug("Stopping live stream of %s, no clients left", self.name)
+            self._producer.cancel()
+            self._producer = None
 
     async def _produce(self) -> None:
         _LOGGER.debug("Starting live stream of %s", self.name)
@@ -203,6 +225,8 @@ class HikConnectCamera(Camera):
                 verification_code=self._verification_code,
             ):
                 count += 1
+                if frame.keyframe and (params := parameter_sets(frame.codec, frame.data)):
+                    self.parameter_sets = params
                 if count == 1:
                     _LOGGER.debug(
                         "First frame of %s: %s, keyframe %s", self.name, frame.codec, frame.keyframe
@@ -224,6 +248,81 @@ class HikConnectCamera(Camera):
                 queue.put_nowait(None)
             else:
                 queue.put_nowait(frame)
+
+    def talk(self, codec: str, audio: bytes) -> None:
+        """Audio from the browser microphone (G.711 `codec`), start a talk session on the first."""
+        if (queue := self._talk_queue) is None:
+            if time.monotonic() < self._talk_retry_at:
+                return
+            queue = self._talk_queue = asyncio.Queue(TALK_QUEUE_SIZE)
+            self.hass.async_create_background_task(
+                self._talk(queue, codec), f"hikconnect talk {self.entity_id}"
+            )
+        if queue.full():
+            _LOGGER.debug("Talk to %s lags behind, dropping audio", self.name)
+        else:
+            queue.put_nowait(audio)
+
+    async def _talk(self, queue: asyncio.Queue, codec: str) -> None:
+        _LOGGER.debug("Starting talk to %s, %s audio from the browser", self.name, codec)
+        received = chunks = dropped = 0
+        failed = True
+        try:
+            async with self._api.talk(
+                self._device_info["serial"], self._camera_info["channel_number"]
+            ) as session:
+                device_codec = TALK_CODECS.get(session.codec)
+                _LOGGER.debug(
+                    "Talk to %s started, device codec %s", self.name, session.codec_name
+                )
+                if device_codec is None:
+                    _LOGGER.warning(
+                        "Talk to %s is not supported: the device wants %s audio",
+                        self.name,
+                        session.codec_name,
+                    )
+                    return
+                convert = g711.converter(codec, device_codec)
+                # recorded while the session was starting, sending it would delay all the rest
+                while not queue.empty():
+                    queue.get_nowait()
+                    dropped += 1
+                loop = asyncio.get_running_loop()
+                buffer, due = b"", loop.time()
+                while True:
+                    try:
+                        async with asyncio.timeout(TALK_IDLE_TIMEOUT):
+                            audio = await queue.get()
+                    except TimeoutError:
+                        _LOGGER.debug("No audio for %s s, ending talk to %s", TALK_IDLE_TIMEOUT, self.name)
+                        failed = False
+                        break
+                    received += 1
+                    buffer += convert(audio)
+                    due = max(due, loop.time())
+                    while len(buffer) >= TALK_CHUNK:
+                        async with asyncio.timeout(TALK_SEND_TIMEOUT):
+                            await session.send(buffer[:TALK_CHUNK])
+                        buffer = buffer[TALK_CHUNK:]
+                        chunks += 1
+                        due += TALK_CHUNK_TIME
+                        await asyncio.sleep(due - loop.time())
+        except (HikConnectError, aiohttp.ClientError, OSError, TimeoutError) as exc:
+            _LOGGER.warning("Talk to %s failed: %s", self.name, str(exc) or repr(exc))
+        finally:
+            if self._talk_queue is queue:
+                self._talk_queue = None
+            if failed:
+                self._talk_retry_at = time.monotonic() + TALK_RETRY_DELAY
+            _LOGGER.debug(
+                "Talk to %s ended: %d packets from the browser (%d dropped at start), "
+                "%d sent to the device%s",
+                self.name,
+                received + dropped,
+                dropped,
+                chunks,
+                f", next try in {TALK_RETRY_DELAY} s" if failed else "",
+            )
 
     async def async_will_remove_from_hass(self) -> None:
         if self._producer:
