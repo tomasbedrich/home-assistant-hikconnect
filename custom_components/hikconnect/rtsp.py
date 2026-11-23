@@ -150,7 +150,10 @@ class _Session:
         self.video_channel = 0
         self.player: asyncio.Task | None = None
         self.ssrc = int.from_bytes(os.urandom(4))
-        self.seq = self.rtp_ts = 0
+        self.seq = 0
+        # random start (RFC 3550): ffmpeg takes an RTP timestamp of 0 as unset, gives the first
+        # two frames the same pts and HA recordings then fail on a repeated dts
+        self.ts_offset = self.rtp_ts = int.from_bytes(os.urandom(4))
         self.last_write = 0.0
         self.counts = {"video": 0, "audio": 0}
 
@@ -293,7 +296,7 @@ class _Session:
 
     async def _send_frame(self, frame) -> None:
         nals = nal_units(frame.data)
-        self.rtp_ts = frame.pts & 0xFFFFFFFF
+        self.rtp_ts = (frame.pts + self.ts_offset) & 0xFFFFFFFF
         out = []
         for n, nal in enumerate(nals):
             parts = payloads(frame.codec, nal)
