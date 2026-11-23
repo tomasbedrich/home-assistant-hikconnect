@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.core_config import async_process_ha_core_config
+from homeassistant.setup import async_setup_component
 
 from custom_components.hikconnect.const import DOMAIN
 from test_camera import Frame, _api, _setup
@@ -238,4 +239,30 @@ async def test_fragmented_decodes(hass: HomeAssistant, hass_client_no_auth, go2r
         url = await go2rtc("cam", source)
         decoded = await hass.async_add_executor_job(_decode, url, {"rtsp_transport": "tcp"})
         _check(decoded, skipped=3)
+    await _wait_producer_stopped(camera)
+
+
+@pytest.mark.parametrize("codec", ["h264", "h265"])
+@pytest.mark.enable_socket
+async def test_ha_record(hass: HomeAssistant, hass_client_no_auth, tmp_path, codec):
+    """camera.record joins the HA stream segments, their timestamps must continue (issue #83)."""
+    assert await async_setup_component(hass, "stream", {})
+    camera, _ = await _camera(hass, hass_client_no_auth, codec)
+    path = tmp_path.resolve() / "record.mp4"
+    hass.config.allowlist_external_dirs = {str(path.parent)}
+    stream = await camera.async_create_stream()
+    await stream.async_record(str(path), duration=8, lookback=0)  # more than one segment
+    for _ in range(200):
+        if path.exists():
+            break
+        await asyncio.sleep(0.1)
+    await stream.stop()
+
+    def read():
+        with av.open(str(path)) as container:
+            return [p.dts for p in container.demux(container.streams.video[0]) if p.size]
+
+    dts = await hass.async_add_executor_job(read)
+    assert len(dts) > 4 * FPS
+    assert all(b > a for a, b in zip(dts, dts[1:])), f"dts not increasing: {dts}"
     await _wait_producer_stopped(camera)
