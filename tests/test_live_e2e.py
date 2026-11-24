@@ -188,6 +188,7 @@ log:
                 assert res.status == 200, await res.text()
             return f"rtsp://127.0.0.1:{rtsp_port}/{name}"
 
+        add_stream.url = base
         yield add_stream
     finally:
         await session.close()
@@ -266,3 +267,23 @@ async def test_ha_record(hass: HomeAssistant, hass_client_no_auth, tmp_path, cod
     assert len(dts) > 4 * FPS
     assert all(b > a for a, b in zip(dts, dts[1:])), f"dts not increasing: {dts}"
     await _wait_producer_stopped(camera)
+
+
+@pytest.mark.enable_socket
+async def test_two_way_audio_capability(hass, hass_client_no_auth, hass_ws_client, go2rtc):
+    """The frontend shows the talk button only when camera/capabilities says two_way_audio."""
+    from homeassistant.components.camera.const import PREVIEW_FEATURE_TWO_WAY_AUDIO
+    from homeassistant.components.labs import async_update_preview_feature
+
+    for domain in ("labs", "websocket_api"):
+        assert await async_setup_component(hass, domain, {})
+    await async_update_preview_feature(hass, "camera", PREVIEW_FEATURE_TWO_WAY_AUDIO, True)
+    assert await async_setup_component(hass, "go2rtc", {"go2rtc": {"url": go2rtc.url}})
+    camera, _ = await _camera(hass, hass_client_no_auth, "h264")
+    await hass.async_block_till_done()
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": "camera/capabilities", "entity_id": camera.entity_id})
+    msg = await client.receive_json()
+    assert msg["success"], msg
+    assert sorted(msg["result"]["frontend_stream_types"]) == ["hls", "web_rtc"]
+    assert msg["result"]["two_way_audio"]
