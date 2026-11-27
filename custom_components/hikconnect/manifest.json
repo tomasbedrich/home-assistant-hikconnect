@@ -21,7 +21,7 @@
 		"hikconnect"
 	],
 	"requirements": [
-		"hikconnect==3.3.0b1"
+		"hikconnect==3.3.0b2"
 	],
-	"version": "3.3.0b2"
+	"version": "3.3.0b3"
 }
