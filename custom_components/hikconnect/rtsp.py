@@ -2,8 +2,10 @@
 Minimal RTSP server, the stream source of the cameras for go2rtc and HA stream.
 
 Video goes out as RTP (H.264 RFC 6184, H.265 RFC 7798) interleaved in the RTSP TCP connection.
-Clients asking for the ONVIF backchannel (go2rtc does) also get a receive-only G.711 audio
-track: go2rtc sends the browser microphone into it, the camera passes it on to the talk session.
+Clients asking for the ONVIF backchannel (go2rtc does) also get two G.711 audio tracks:
+- the backchannel: go2rtc sends the browser microphone into it, the camera passes it on to the
+  talk session
+- the device audio: what the device sends back in the talk session, silent without a talk
 """
 
 import asyncio
@@ -29,6 +31,9 @@ MAX_PAYLOAD = 1400
 PT_VIDEO = 96
 PT_PCMU, PT_PCMA = 0, 8
 AUDIO_CODECS = {PT_PCMU: "PCMU", PT_PCMA: "PCMA"}
+# device audio packets: 20 ms of G.711, the usual WebRTC packet time
+AUDIO_PACKET = 160
+AUDIO_RATE = 8000
 BACKCHANNEL = "www.onvif.org/ver20/backchannel"
 
 
@@ -97,6 +102,12 @@ def sdp(codec: str, params: dict[int, bytes], backchannel: bool) -> str:
         "a=control:trackID=0",
     ]
     if backchannel:
+        lines += [
+            f"m=audio 0 RTP/AVP {PT_PCMU}",
+            f"a=rtpmap:{PT_PCMU} PCMU/8000",
+            "a=control:trackID=2",
+            "a=recvonly",
+        ]
         # ONVIF backchannel: the client sends, G.711 is what the devices mostly talk and what
         # browsers offer, go2rtc does not transcode the microphone
         lines += [
@@ -148,14 +159,16 @@ class _Session:
         self.first = None  # the frame read in DESCRIBE, sent first on PLAY
         self.channels: dict[int, int] = {}  # interleaved channel -> track
         self.video_channel = 0
+        self.audio_channel: int | None = None
         self.player: asyncio.Task | None = None
         self.ssrc = int.from_bytes(os.urandom(4))
         self.seq = 0
         # random start (RFC 3550): ffmpeg takes an RTP timestamp of 0 as unset, gives the first
         # two frames the same pts and HA recordings then fail on a repeated dts
         self.ts_offset = self.rtp_ts = int.from_bytes(os.urandom(4))
+        self.audio_seq = self.audio_ts = 0
         self.last_write = 0.0
-        self.counts = {"video": 0, "audio": 0}
+        self.counts = {"video": 0, "audio": 0, "device audio": 0}
 
     async def run(self) -> None:
         while True:
@@ -217,6 +230,8 @@ class _Session:
         if method == "PLAY":
             if self.player is None:
                 self.player = asyncio.create_task(self._play())
+                if self.audio_channel is not None:
+                    self.camera.audio_listeners.add(self._send_audio)
             return "200 OK", [], ""
         return "501 Not Implemented", [], ""
 
@@ -256,7 +271,7 @@ class _Session:
     def _setup(self, url, headers):
         track = urlsplit(url).path.rstrip("/").rpartition("trackID=")[2]
         transport = headers.get("transport", "")
-        if track not in ("0", "1") or "interleaved=" not in transport:
+        if track not in ("0", "1", "2") or "interleaved=" not in transport:
             # UDP is not served, ffmpeg falls back to TCP
             return "461 Unsupported Transport", [], ""
         channel = int(transport.split("interleaved=")[1].split("-")[0].split(";")[0])
@@ -265,6 +280,8 @@ class _Session:
         self.channels[channel] = int(track)
         if track == "0":
             self.video_channel = channel
+        elif track == "2":
+            self.audio_channel = channel
         return "200 OK", [f"Transport: RTP/AVP/TCP;unicast;interleaved={channel}-{channel + 1}"], ""
 
     def _rtp_in(self, channel: int, packet: bytes) -> None:
@@ -312,6 +329,23 @@ class _Session:
         self.last_write = time.monotonic()
         await self.writer.drain()
 
+    def _send_audio(self, audio: bytes) -> None:
+        """Device audio (PCMU) of a talk, in packets of AUDIO_PACKET."""
+        if self.writer.is_closing():
+            return
+        # after silence the timestamp follows the clock, so the player does not join the gap
+        self.audio_ts = max(self.audio_ts, int(time.monotonic() * AUDIO_RATE))
+        out = []
+        for i in range(0, len(audio), AUDIO_PACKET):
+            part = audio[i : i + AUDIO_PACKET]
+            self.audio_seq = (self.audio_seq + 1) & 0xFFFF
+            ts = (self.audio_ts + self.ts_offset) & 0xFFFFFFFF
+            rtp = struct.pack(">BBHII", 0x80, PT_PCMU, self.audio_seq, ts, self.ssrc) + part
+            out.append(struct.pack(">cBH", b"$", self.audio_channel, len(rtp)) + rtp)
+            self.audio_ts += len(part)
+            self.counts["device audio"] += 1
+        self.writer.write(b"".join(out))
+
     async def _keepalive(self) -> None:
         """RTCP sender reports while the cloud stream reconnects, so go2rtc keeps the source."""
         while True:
@@ -335,10 +369,13 @@ class _Session:
             await self.frames.aclose()
         self.writer.close()
         if self.camera is not None:
+            self.camera.audio_listeners.discard(self._send_audio)
             _LOGGER.debug(
-                "RTSP client %s of %s disconnected: %d video packets sent, %d talk packets received",
+                "RTSP client %s of %s disconnected: %d video packets sent, %d talk packets "
+                "received, %d device audio packets sent",
                 self.peer,
                 self.camera.entity_id,
                 self.counts["video"],
                 self.counts["audio"],
+                self.counts["device audio"],
             )

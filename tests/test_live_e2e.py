@@ -269,6 +269,55 @@ async def test_ha_record(hass: HomeAssistant, hass_client_no_auth, tmp_path, cod
     await _wait_producer_stopped(camera)
 
 
+def _read_audio(url, size):
+    """Blocking: (codec, first `size` audio bytes) of the URL read through go2rtc."""
+    data, video = b"", 0
+    with av.open(url, options={"rtsp_transport": "tcp"}, timeout=15) as container:
+        for packet in container.demux():
+            if packet.stream.type == "audio":
+                data += bytes(packet)
+                if len(data) >= size:
+                    return packet.stream.codec_context.name, data[:size]
+            elif (video := video + 1) > 20 * FPS:
+                break
+    return None, data
+
+
+@pytest.mark.enable_socket
+async def test_go2rtc_device_audio(hass: HomeAssistant, hass_client_no_auth, go2rtc):
+    """The device audio of a talk reaches go2rtc consumers through the recvonly track."""
+    from test_rtsp import _FakeTalk, _fake_talk
+
+    audio = bytes(i * 7 % 256 for i in range(160 * 50))  # 1 s of PCMU
+    api = _api()
+    api.live_stream.side_effect = _fake_live_stream("h264")
+    api.talk = _fake_talk(_FakeTalk(1, [audio[i : i + 160] for i in range(0, len(audio), 160)]))
+    await _setup(hass, api)
+    client = await hass_client_no_auth()
+    await async_process_ha_core_config(hass, {"internal_url": str(client.make_url("/")).rstrip("/")})
+    camera = next(iter(hass.data[DOMAIN]["cameras"].values()))
+    camera.entity_id = hass.states.async_entity_ids("camera")[0]
+    url = await go2rtc("cam", await camera.stream_source())
+
+    with patch("custom_components.hikconnect.camera.TALK_IDLE_TIMEOUT", 0.3):
+        reader = hass.async_add_executor_job(_read_audio, url, len(audio))
+        for _ in range(150):
+            if camera.audio_listeners:
+                break
+            await asyncio.sleep(0.1)
+        assert camera.audio_listeners, "go2rtc did not set up the device audio track"
+        camera.talk("PCMU", b"\xff" * 160)  # the microphone starts the talk
+        codec, data = await reader
+        for _ in range(100):
+            if api.talk.closed:
+                break
+            await asyncio.sleep(0.05)
+
+    assert codec == "pcm_mulaw"
+    assert data == audio
+    await _wait_producer_stopped(camera)
+
+
 @pytest.mark.enable_socket
 async def test_two_way_audio_capability(hass, hass_client_no_auth, hass_ws_client, go2rtc):
     """The frontend shows the talk button only when camera/capabilities says two_way_audio."""

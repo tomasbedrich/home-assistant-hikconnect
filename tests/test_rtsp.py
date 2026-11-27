@@ -45,6 +45,12 @@ class _Client:
         body = await self.reader.readexactly(int(headers.get("content-length", 0)))
         return int(status), headers, body.decode()
 
+    async def packet(self):
+        """The next interleaved packet as (channel, RTP)."""
+        assert await self.reader.readexactly(1) == b"$"
+        channel, length = struct.unpack(">BH", await self.reader.readexactly(3))
+        return channel, await self.reader.readexactly(length)
+
     def send_audio(self, channel, payload_type, payload, seq):
         rtp = struct.pack(">BBHII", 0x80, payload_type, seq, 0, 1234) + payload
         self.writer.write(struct.pack(">cBH", b"$", channel, len(rtp)) + rtp)
@@ -67,11 +73,17 @@ async def _source(hass):
 
 
 class _FakeTalk:
-    def __init__(self, codec):
+    def __init__(self, codec, device_audio=()):
         self.codec, self.codec_name, self.sent = codec, {1: "G711_MU", 2: "G711_A"}.get(codec, "AAC"), []
+        self.device_audio = device_audio
 
     async def send(self, audio):
         self.sent.append(audio)
+
+    async def received(self):
+        for audio in self.device_audio:
+            yield audio
+        await asyncio.Event().wait()  # until the talk ends
 
 
 def _fake_talk(session):
@@ -173,6 +185,42 @@ async def test_talk_unsupported_codec(hass: HomeAssistant, socket_enabled, caplo
     assert api.talk.closed == 1
     assert session.sent == []
     assert "device wants AAC audio" in caplog.text
+
+
+async def test_talk_device_audio(hass: HomeAssistant, socket_enabled):
+    """During a talk the device audio goes out in the recvonly track, as PCMU in 20 ms packets."""
+    device_audio = [bytes(range(256)) * 2, bytes(range(100))]
+    api = _api()
+    api.talk = _fake_talk(_FakeTalk(2, device_audio))  # an A-law device
+    await _setup(hass, api)
+    camera, url = await _source(hass)
+    expected = g711.converter("PCMA", "PCMU")(b"".join(device_audio))
+
+    received = []
+    async with _client(url) as client:
+        _, headers, sdp = await client.request("DESCRIBE", None, REQUIRE)
+        assert "m=audio 0 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=control:trackID=2\r\na=recvonly" in sdp
+        base = headers["content-base"]
+        for track in range(3):
+            transport = f"Transport: RTP/AVP/TCP;interleaved={2 * track}-{2 * track + 1}"
+            assert (await client.request("SETUP", base + f"trackID={track}", transport))[0] == 200
+        await client.request("PLAY", base)
+        client.send_audio(2, 0, b"\xff" * 160, 0)  # the microphone starts the talk
+        await client.writer.drain()
+        async with asyncio.timeout(5):
+            while sum(len(rtp) - 12 for rtp in received) < len(expected):
+                channel, rtp = await client.packet()
+                if channel == 4:
+                    received.append(rtp)
+
+    assert b"".join(rtp[12:] for rtp in received) == expected
+    assert max(len(rtp) - 12 for rtp in received) == 160
+    assert {rtp[1] & 0x7F for rtp in received} == {0}
+    seqs = [struct.unpack(">H", rtp[2:4])[0] for rtp in received]
+    assert seqs == [(seqs[0] + i) & 0xFFFF for i in range(len(seqs))]
+    # one burst: each timestamp follows the samples of the previous packet
+    stamps = [struct.unpack(">I", rtp[4:8])[0] for rtp in received]
+    assert [(b - a) & 0xFFFFFFFF for a, b in zip(stamps, stamps[1:])] == [len(rtp) - 12 for rtp in received[:-1]]
 
 
 async def test_talk_catches_up_after_jitter(hass: HomeAssistant, caplog):
