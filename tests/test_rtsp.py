@@ -175,6 +175,37 @@ async def test_talk_unsupported_codec(hass: HomeAssistant, socket_enabled, caplo
     assert "device wants AAC audio" in caplog.text
 
 
+async def test_talk_catches_up_after_jitter(hass: HomeAssistant, caplog):
+    """Audio arriving in bursts reaches the device without leaving a backlog that overflows later."""
+    caplog.set_level(logging.DEBUG, "custom_components.hikconnect")
+    api = _api()
+    session = _FakeTalk(1)
+    api.talk = _fake_talk(session)
+    await _setup(hass, api)
+    camera = next(iter(hass.data[DOMAIN]["cameras"].values()))
+    camera.entity_id = hass.states.async_entity_ids("camera")[0]
+    packet = b"\xff" * 160  # 20 ms of PCMU, as the browser sends it
+
+    with patch("custom_components.hikconnect.camera.TALK_IDLE_TIMEOUT", 0.3):
+        packets = 0
+        for _ in range(3):
+            for _ in range(8):  # a network hiccup delivers 160 ms of audio at once
+                camera.talk("PCMU", packet)
+                packets += 1
+            for _ in range(25):
+                await asyncio.sleep(0.02)
+                camera.talk("PCMU", packet)
+                packets += 1
+        for _ in range(100):
+            if api.talk.closed:
+                break
+            await asyncio.sleep(0.05)
+
+    assert api.talk.closed == 1
+    assert len(session.sent) == packets
+    assert f"0 lagging behind), {packets} sent" in caplog.text
+
+
 @pytest.mark.parametrize(("codec", "table"), [("pcm_mulaw", g711.ULAW), ("pcm_alaw", g711.ALAW)])
 def test_g711_matches_ffmpeg(codec, table):
     ctx = av.CodecContext.create(codec, "r")
